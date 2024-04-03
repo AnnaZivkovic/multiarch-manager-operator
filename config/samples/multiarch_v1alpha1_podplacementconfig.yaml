@@ -14,3 +14,14 @@ spec:
       matchExpressions:
         - key: multiarch.openshift.io/exclude-pod-placement
           operator: DoesNotExist
+  validation:
+      openAPIV3Schema:
+        properties:
+          metadata:
+            type: object
+            properties:
+              name:
+                type: string
+                # Force "cluster" as CR name.
+                enum:
+                  - cluster

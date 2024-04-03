@@ -26,6 +26,23 @@ metadata:
                   "operator": "DoesNotExist"
                 }
               ]
+            },
+            "validation": {
+              "openAPIV3Schema": {
+                "properties": {
+                  "metadata": {
+                    "properties": {
+                      "name": {
+                        "enum": [
+                          "cluster"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                }
+              }
             }
           }
         }
