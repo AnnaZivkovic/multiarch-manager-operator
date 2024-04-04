@@ -8,6 +8,11 @@ metadata:
     operator.openshift.io/uninstall-message: This action won't automatically delete
       managed resources (operands). To prevent data loss or disruption, you'll need
       to manually delete them.
+  labels:
+    operatorframework.io/arch.amd64: supported
+    operatorframework.io/arch.arm64: supported
+    operatorframework.io/arch.ppc64le: supported
+    operatorframework.io/arch.s390x: supported
   name: multiarch-tuning-operator.v0.0.1
   namespace: openshift-multiarch-tuning-operator
 spec:
