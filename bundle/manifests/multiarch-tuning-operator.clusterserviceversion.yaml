@@ -5,7 +5,7 @@ metadata:
     alm-examples: |-
       [
         {
-          "apiVersion": "multiarch.openshift.io/v1alpha1",
+          "apiVersion": "multiarch.openshift.io/v1beta1",
           "kind": "ClusterPodPlacementConfig",
           "metadata": {
             "name": "cluster"
@@ -26,7 +26,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "true"
-    createdAt: "2024-05-29T16:28:50Z"
+    createdAt: "2024-06-18T12:22:21Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -67,6 +67,12 @@ spec:
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1alpha1
+    - description: ClusterPodPlacementConfig is the Schema for the clusterpodplacementconfigs
+        API
+      displayName: Cluster Pod Placement Config
+      kind: ClusterPodPlacementConfig
+      name: clusterpodplacementconfigs.multiarch.openshift.io
+      version: v1beta1
   description: |
     The Multiarch Tuning Operator enhances the user experience for administrators of
     Openshift clusters with multi-architecture compute nodes or Site Reliability
@@ -461,3 +467,15 @@ spec:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
   version: 0.9.0
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1
+    containerPort: 443
+    conversionCRDs:
+    - clusterpodplacementconfigs.multiarch.openshift.io
+    deploymentName: multiarch-tuning-operator-controller-manager
+    generateName: cclusterpodplacementconfigs.kb.io
+    sideEffects: None
+    targetPort: 9443
+    type: ConversionWebhook
+    webhookPath: /convert
