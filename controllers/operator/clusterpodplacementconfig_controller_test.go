@@ -18,9 +18,7 @@ package operator
 
 import (
 	"fmt"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -31,6 +29,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -307,7 +307,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 				}), ppc2)
 				Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig", err)
 				// change the clusterpodplacementconfig's logLevel
-				ppc2.Spec.LogVerbosity = v1alpha1.LogVerbosityLevelTraceAll
+				ppc2.Spec.LogVerbosity = common.LogVerbosityLevelTraceAll
 				err = k8sClient.Update(ctx, ppc2)
 				Expect(err).NotTo(HaveOccurred(), "failed to update ClusterPodPlacementConfig", err)
 				Eventually(func(g Gomega) {
@@ -320,7 +320,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 					}), &d)
 					g.Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+PodPlacementControllerName, err)
 					g.Expect(d.Spec.Template.Spec.Containers[0].Args).To(ContainElement(
-						fmt.Sprintf("-zap-log-level=%d", v1alpha1.LogVerbosityLevelTraceAll.ToZapLevelInt())))
+						fmt.Sprintf("-zap-log-level=%d", common.LogVerbosityLevelTraceAll.ToZapLevelInt())))
 				}).Should(Succeed(), "the deployment "+PodPlacementControllerName+" should be updated")
 				Eventually(func(g Gomega) {
 					d := appsv1.Deployment{}
@@ -332,7 +332,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 					}), &d)
 					g.Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+PodPlacementWebhookName, err)
 					g.Expect(d.Spec.Template.Spec.Containers[0].Args).To(ContainElement(
-						fmt.Sprintf("-zap-log-level=%d", v1alpha1.LogVerbosityLevelTraceAll.ToZapLevelInt())))
+						fmt.Sprintf("-zap-log-level=%d", common.LogVerbosityLevelTraceAll.ToZapLevelInt())))
 				}).Should(Succeed(), "the deployment "+PodPlacementWebhookName+" should be updated")
 			})
 			It("Should sync the namespace selector", func() {
@@ -388,7 +388,7 @@ func (p *clusterPodPlacementConfigFactory) WithNamespaceSelector(labelSelector *
 	return p
 }
 
-func (p *clusterPodPlacementConfigFactory) WithLogVerbosity(logVerbosity v1alpha1.LogVerbosityLevel) *clusterPodPlacementConfigFactory {
+func (p *clusterPodPlacementConfigFactory) WithLogVerbosity(logVerbosity common.LogVerbosityLevel) *clusterPodPlacementConfigFactory {
 	p.Spec.LogVerbosity = logVerbosity
 	return p
 }
