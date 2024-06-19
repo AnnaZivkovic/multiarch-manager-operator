@@ -18,6 +18,7 @@ package operator
 
 import (
 	"fmt"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -167,12 +168,12 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 	When("The ClusterPodPlacementConfig", func() {
 		Context("is handling the lifecycle of the operand", func() {
 			BeforeEach(func() {
-				err := k8sClient.Create(ctx, newClusterPodPlacementConfig().WithName(v1alpha1.SingletonResourceObjectName).Build())
+				err := k8sClient.Create(ctx, newClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 				Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
 				validateReconcile()
 			})
 			AfterEach(func() {
-				err := k8sClient.Delete(ctx, newClusterPodPlacementConfig().WithName(v1alpha1.SingletonResourceObjectName).Build())
+				err := k8sClient.Delete(ctx, newClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 				Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
 				validateDeletion()
 			})
@@ -300,7 +301,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 				ppc2 := &v1alpha1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1alpha1.ClusterPodPlacementConfig{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      v1alpha1.SingletonResourceObjectName,
+						Name:      common.SingletonResourceObjectName,
 						Namespace: utils.Namespace(),
 					},
 				}), ppc2)
@@ -339,7 +340,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 				ppc := &v1alpha1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1alpha1.ClusterPodPlacementConfig{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      v1alpha1.SingletonResourceObjectName,
+						Name:      common.SingletonResourceObjectName,
 						Namespace: utils.Namespace(),
 					},
 				}), ppc)

@@ -1,4 +1,4 @@
-package v1alpha1
+package common
 
 // LogVerbosityLevel is a type derived from string used to represent the log level in operands' CRDs.
 // +kubebuilder:validation:Enum=Normal;Debug;Trace;TraceAll

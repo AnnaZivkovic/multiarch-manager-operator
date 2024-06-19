@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -155,12 +156,12 @@ func RunOperator(mgr ctrl.Manager) {
 		ClientSet: clientset,
 		Recorder: events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, &corev1.ObjectReference{
 			Kind:       gvk.Kind,
-			Name:       multiarchv1alpha1.SingletonResourceObjectName,
+			Name:       common.SingletonResourceObjectName,
 			Namespace:  utils.Namespace(),
 			APIVersion: gvk.GroupVersion().String(),
 		}),
 	}).SetupWithManager(mgr), unableToCreateController, controllerKey, "ClusterPodPlacementConfig")
-	must((&multiarchv1alpha1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr), unableToCreateController,
+	must((&multiarchv1beta1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr), unableToCreateController,
 		controllerKey, "ClusterPodPlacementConfigConversionWebhook")
 }
 

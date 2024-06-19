@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,7 +31,7 @@ type ClusterPodPlacementConfigSpec struct {
 	// Defaults to "Normal".
 	// +optional
 	// +kubebuilder:default=Normal
-	LogVerbosity LogVerbosityLevel `json:"logVerbosity,omitempty"`
+	LogVerbosity common.LogVerbosityLevel `json:"logVerbosity,omitempty"`
 
 	// NamespaceSelector filters the namespaces that the architecture aware pod placement can operate.
 	//

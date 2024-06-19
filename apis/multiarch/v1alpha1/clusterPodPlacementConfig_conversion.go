@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
@@ -29,7 +30,7 @@ func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
 	dst.ObjectMeta = src.ObjectMeta
 
 	// Spec
-	dst.Spec.LogVerbosity = multiarchv1beta1.LogVerbosityLevel(src.Spec.LogVerbosity)
+	dst.Spec.LogVerbosity = common.LogVerbosityLevel(src.Spec.LogVerbosity)
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
 
 	// Status
@@ -52,7 +53,7 @@ func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
 	dst.ObjectMeta = src.ObjectMeta
 
 	// Spec
-	dst.Spec.LogVerbosity = LogVerbosityLevel(src.Spec.LogVerbosity)
+	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
 
 	// Status
