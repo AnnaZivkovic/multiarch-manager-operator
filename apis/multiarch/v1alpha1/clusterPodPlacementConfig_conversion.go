@@ -16,5 +16,51 @@ limitations under the License.
 
 package v1alpha1
 
-// Hub marks this type as a conversion hub.
-func (*ClusterPodPlacementConfig) Hub() {}
+import (
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
+)
+
+// ConvertTo converts this ClusterPodPlacementConfig to the Hub version v1beta1.
+func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
+	dst := dstRaw.(*multiarchv1beta1.ClusterPodPlacementConfig)
+
+	// ObjectMeta
+	dst.ObjectMeta = src.ObjectMeta
+
+	// Spec
+	dst.Spec.LogVerbosity = multiarchv1beta1.LogVerbosityLevel(src.Spec.LogVerbosity)
+	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+
+	// Status
+	dst.Status.Conditions = src.Status.Conditions
+
+	// +kubebuilder:docs-gen:collapse=rote conversion
+	return nil
+}
+
+/*
+ConvertFrom is expected to modify its receiver to contain the converted object.
+Most of the conversion is straightforward copying, except for converting our changed field.
+*/
+
+// ConvertFrom converts from the Hub version (1valpha1) to this 1vbeta1.
+func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
+	src := srcRaw.(*multiarchv1beta1.ClusterPodPlacementConfig)
+
+	// ObjectMeta
+	dst.ObjectMeta = src.ObjectMeta
+
+	// Spec
+	dst.Spec.LogVerbosity = LogVerbosityLevel(src.Spec.LogVerbosity)
+	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+
+	// Status
+	dst.Status.Conditions = src.Status.Conditions
+
+	if dst.ObjectMeta.Annotations == nil {
+		dst.ObjectMeta.Annotations = make(map[string]string)
+	}
+
+	return nil
+}

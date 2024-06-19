@@ -66,7 +66,6 @@ type ClusterPodPlacementConfigStatus struct {
 // Creating this object will trigger the deployment of the architecture aware pod placement operand.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:storageversion
 // +kubebuilder:resource:path=clusterpodplacementconfigs,scope=Cluster
 type ClusterPodPlacementConfig struct {
 	metav1.TypeMeta   `json:",inline"`
