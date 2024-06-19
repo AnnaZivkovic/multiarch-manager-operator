@@ -15,3 +15,12 @@ patches:
       version: v1
       kind: CustomResourceDefinition
       name: clusterpodplacementconfigs.multiarch.openshift.io
+  - patch: |
+      - op: add
+        path: /metadata/annotations
+        value:
+          service.beta.openshift.io/serving-cert-secret-name: multiarch-tuning-operator-controller-manager-service-cert
+    target:
+      version: v1
+      kind: Service
+      name: controller-manager-service

@@ -26,7 +26,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "true"
-    createdAt: "2024-06-19T08:07:51Z"
+    createdAt: "2024-06-19T09:58:21Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -360,7 +360,7 @@ spec:
                     - ALL
                 volumeMounts:
                 - mountPath: /var/run/manager/tls
-                  name: webhook-server-cert
+                  name: multiarch-tuning-operator-controller-manager-service-cert
                   readOnly: true
                 - mountPath: /etc/ssl/certs/
                   name: ca-projected-volume
@@ -393,10 +393,10 @@ spec:
               serviceAccountName: multiarch-tuning-operator-controller-manager
               terminationGracePeriodSeconds: 10
               volumes:
-              - name: webhook-server-cert
+              - name: multiarch-tuning-operator-controller-manager-service-cert
                 secret:
                   defaultMode: 420
-                  secretName: webhook-server-cert
+                  secretName: multiarch-tuning-operator-controller-manager-service-cert
               - name: ca-projected-volume
                 projected:
                   sources:

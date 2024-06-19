@@ -10,15 +10,15 @@ spec:
       - name: manager
         volumeMounts:
           - mountPath: /var/run/manager/tls
-            name: webhook-server-cert
+            name: multiarch-tuning-operator-controller-manager-service-cert
             readOnly: true
           - mountPath: /etc/ssl/certs/
             name: ca-projected-volume
             readOnly: true
       volumes:
-        - name: webhook-server-cert
+        - name: multiarch-tuning-operator-controller-manager-service-cert
           secret:
-            secretName: webhook-server-cert
+            secretName: multiarch-tuning-operator-controller-manager-service-cert
             defaultMode: 420
         - name: ca-projected-volume
           projected:
