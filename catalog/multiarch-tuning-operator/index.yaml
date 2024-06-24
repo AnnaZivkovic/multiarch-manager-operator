@@ -3,20 +3,20 @@ defaultChannel: tech-preview
 description: |
   The Multiarch Tuning Operator enhances the operational experience within multi-architecture clusters,
   and single-architecture clusters that are migrating to a multi-architecture compute configuration.
-  
+
   This Operator implements the `clusterpodplacementconfigs` custom resource (CR) to support architecture-aware
   workload scheduling.
-  
+
   To enable architecture-aware workload scheduling, you must create the `ClusterPodPlacementConfig` object
   by using the Multiarch Tuning Operator. When you create the `ClusterPodPlacementConfig` object,
   this Operator deploys an operand.
   When a pod is created, the operand performs the following actions:
-  
+
   1. Add the `multiarch.openshift.io/scheduling-gate` scheduling gate that prevents the scheduling of the pod.
   2. Compute a scheduling predicate that includes the supported architecture values for the `kubernetes.io/arch`.
   3. Integrate the scheduling predicate as a `nodeAffinity` requirement in the pod specification.
   4. Remove the scheduling gate from the pod.
-  
+
   When the operand removes the scheduling gate, the pod enters the scheduling cycle.
   The workload is then scheduled on nodes based on the supported architectures.
 icon:
