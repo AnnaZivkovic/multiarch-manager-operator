@@ -19,8 +19,6 @@ package operator
 import (
 	"fmt"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/informers"
-
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +31,7 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -555,7 +554,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			})
 			It("should cache the ClusterPodPlacementConfig", func() {
 				By("Checking initialization of the cache with the ClusterPodPlacementConfig")
-				ic := informers.CacheSingleton()
+				ic := podplacement.CacheSingleton()
 				ppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKey{
 					Name: common.SingletonResourceObjectName,

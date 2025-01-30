@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
-	"github.com/openshift/multiarch-tuning-operator/pkg/informers"
 
 	"sigs.k8s.io/kustomize/api/resmap"
 
@@ -219,7 +218,7 @@ func runManager() {
 	By("Setting up Cluster Podplacement Config informer")
 	err = mgr.Add(podplacement.NewCPPCSyncer(mgr))
 	Expect(err).NotTo(HaveOccurred())
-	ic := informers.CacheSingleton()
+	ic := podplacement.CacheSingleton()
 	Expect(ic.GetClusterPodPlacementConfig()).To(BeNil())
 
 	suiteLog.Info("Manager created")
