@@ -1,4 +1,4 @@
-package podplacement
+package clusterpodplacementconfig
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
-	"github.com/openshift/multiarch-tuning-operator/pkg/informers"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig/internal"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -32,7 +32,6 @@ func (s *CPPCSyncer) Start(ctx context.Context) error {
 	s.log.Info("Starting CPPC Syncer")
 	mgr := s.mgr
 
-	ic := informers.CacheSingleton()
 	// Get informer for ClusterPodPlacementConfig
 	CPPCInformer, err := mgr.GetCache().GetInformerForKind(ctx, multiarchv1beta1.GroupVersion.WithKind(multiarchv1beta1.ClusterPodPlacementConfigKind))
 	if err != nil {
@@ -42,9 +41,9 @@ func (s *CPPCSyncer) Start(ctx context.Context) error {
 
 	// Register event handlers
 	_, err = CPPCInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    s.onAdd(ic),
-		UpdateFunc: s.onUpdate(ic),
-		DeleteFunc: s.onDelete(ic),
+		AddFunc:    s.onAdd(),
+		UpdateFunc: s.onUpdate(),
+		DeleteFunc: s.onDelete(),
 	})
 	if err != nil {
 		s.log.Error(err, "Error registering handler for ClusterPodPlacementConfig")
@@ -55,7 +54,7 @@ func (s *CPPCSyncer) Start(ctx context.Context) error {
 }
 
 // onAdd handles the addition of a ClusterPodPlacementConfig.
-func (s *CPPCSyncer) onAdd(ic informers.ICache) func(obj interface{}) {
+func (s *CPPCSyncer) onAdd() func(obj interface{}) {
 	return func(obj interface{}) {
 		CPPC, ok := obj.(*multiarchv1beta1.ClusterPodPlacementConfig)
 		if !ok {
@@ -64,18 +63,13 @@ func (s *CPPCSyncer) onAdd(ic informers.ICache) func(obj interface{}) {
 			return
 		}
 
-		err := ic.StoreClusterPodPlacementConfig(CPPC)
-		if err != nil {
-			s.log.Error(err, "Error updating ClusterPodPlacementConfig",
-				"CPPC name", CPPC.Name)
-		} else {
-			s.log.Info("Added ClusterPodPlacementConfig", "CPPC name", CPPC.Name, "namespace", CPPC.Namespace)
-		}
+		internal.StoreClusterPodPlacementConfig(CPPC)
+		s.log.Info("Added ClusterPodPlacementConfig", "CPPC name", CPPC.Name, "namespace", CPPC.Namespace)
 	}
 }
 
 // onDelete handles the deletion of a ClusterPodPlacementConfig.
-func (s *CPPCSyncer) onDelete(ic informers.ICache) func(obj interface{}) {
+func (s *CPPCSyncer) onDelete() func(obj interface{}) {
 	return func(obj interface{}) {
 
 		CPPC, ok := obj.(*multiarchv1beta1.ClusterPodPlacementConfig)
@@ -85,18 +79,13 @@ func (s *CPPCSyncer) onDelete(ic informers.ICache) func(obj interface{}) {
 			return
 		}
 
-		err := ic.DeleteClusterPodPlacementConfig()
-		if err != nil {
-			s.log.Error(err, "Error deleting ClusterPodPlacementConfig",
-				"name", CPPC.Name)
-		} else {
-			s.log.Info("Deleted ClusterPodPlacementConfig", "name", CPPC.Name, "namespace", CPPC.Namespace)
-		}
+		internal.DeleteClusterPodPlacementConfig()
+		s.log.Info("Deleted ClusterPodPlacementConfig", "name", CPPC.Name, "namespace", CPPC.Namespace)
 	}
 }
 
 // onUpdate handles updates to a ClusterPodPlacementConfig.
-func (s *CPPCSyncer) onUpdate(ic informers.ICache) func(oldObj, newObj interface{}) {
+func (s *CPPCSyncer) onUpdate() func(oldObj, newObj interface{}) {
 	return func(oldobj, newobj interface{}) {
 		oldConfig, ok := oldobj.(*multiarchv1beta1.ClusterPodPlacementConfig)
 
@@ -116,6 +105,12 @@ func (s *CPPCSyncer) onUpdate(ic informers.ICache) func(oldObj, newObj interface
 		if oldConfig.ResourceVersion == newConfig.ResourceVersion {
 			return
 		}
-		s.onAdd(ic)(newobj)
+
+		s.onAdd()(newobj)
 	}
+}
+
+// GetClusterPodPlacementConfig provides access to the stored config.
+func GetClusterPodPlacementConfig() *multiarchv1beta1.ClusterPodPlacementConfig {
+	return internal.GetClusterPodPlacementConfig()
 }

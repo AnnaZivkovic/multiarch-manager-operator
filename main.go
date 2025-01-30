@@ -64,6 +64,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -190,7 +191,7 @@ func RunOperator(mgr ctrl.Manager) {
 	clientset := kubernetes.NewForConfigOrDie(config)
 
 	if enableCPPCInformer {
-		cppcSyncer := podplacement.NewCPPCSyncer(mgr)
+		cppcSyncer := clusterpodplacementconfig.NewCPPCSyncer(mgr)
 		if err := mgr.Add(cppcSyncer); err != nil {
 			setupLog.Error(err, "unable to add CPPCSyncer")
 			os.Exit(1)
