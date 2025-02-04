@@ -115,12 +115,15 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		pod.publishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, ArchitectureAwareGatedPodIgnoredMsg)
 		return
 	}
+
+	cache := CacheSingleton()
+
 	// Prepare the requirement for the node affinity.
 	psdl, err := r.pullSecretDataList(ctx, pod)
 	pod.handleError(err, "Unable to retrieve the image pull secret data for the pod.")
 	// If no error occurred when retrieving the image pull secret data, set the node affinity.
 	if err == nil {
-		_, err = pod.SetNodeAffinityArchRequirement(psdl)
+		_, err = pod.SetNodeAffinityArchRequirement(cache, psdl)
 		pod.handleError(err, "Unable to set the node affinity for the pod.")
 	}
 	if pod.maxRetries() && err != nil {
