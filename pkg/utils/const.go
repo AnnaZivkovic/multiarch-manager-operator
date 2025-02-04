@@ -18,6 +18,7 @@ const (
 const (
 	ArchLabel                       = "kubernetes.io/arch"
 	NodeAffinityLabel               = "multiarch.openshift.io/node-affinity"
+	PreferredNodeAffinityLabel      = "multiarch.openshift.io/preferred-node-affinity"
 	NodeAffinityLabelValueSet       = "set"
 	LabelValueNotSet                = "not-set"
 	HostnameLabel                   = "kubernetes.io/hostname"

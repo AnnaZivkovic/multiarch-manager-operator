@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/image"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -122,13 +123,13 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
 	}
 
-	pod.setArchNodeAffinity(requirement)
+	pod.setRequiredArchNodeAffinity(requirement)
 	return true, nil
 }
 
-// setArchNodeAffinity sets the node affinity for the pod to the given requirement based on the rules in
+// setRequiredArchNodeAffinity sets the node affinity for the pod to the given requirement based on the rules in
 // the sig-scheduling's KEP-3838: https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/3838-pod-mutable-scheduling-directives.
-func (pod *Pod) setArchNodeAffinity(requirement corev1.NodeSelectorRequirement) {
+func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequirement) {
 	// the .requiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms are ORed
 	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
 		// We create a new array of NodeSelectorTerm of length 1 so that we can always iterate it in the next.
@@ -164,6 +165,45 @@ func (pod *Pod) setArchNodeAffinity(requirement corev1.NodeSelectorRequirement) 
 	pod.ensureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet)
 	pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
+}
+
+// SetPreferredArchNodeAffinity sets the node affinity for the pod to the given requirement based on the rules in
+// the sig-scheduling's KEP-3838: https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/3838-pod-mutable-scheduling-directives.
+func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementConfig) {
+	if pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{}
+	}
+
+	// Prevent overriding of predefined kubernetes.io/arch
+	if pod.isPreferredAffinityConfiguredForArchitecture() {
+		pod.ensureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
+		pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+			ArchitecturePreferredPredicateSkippedMsg)
+		return
+	}
+
+	for _, nodeAffinityScoringPlatformTerm := range cppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+		preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+			Weight: nodeAffinityScoringPlatformTerm.Weight,
+			Preference: corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{nodeAffinityScoringPlatformTerm.Architecture},
+					},
+				},
+			},
+		}
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerm)
+	}
+
+	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
+	// track of the fact that the nodeAffinity was patched by the operator.
+	pod.ensureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
+	pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+		ArchitecturePreferredPredicateSetupMsg+fmt.Sprintf("%v", cppc.Spec.Plugins.NodeAffinityScoring.Platforms))
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
@@ -327,16 +367,39 @@ func (pod *Pod) hasControlPlaneNodeSelector() bool {
 }
 
 // shouldIgnorePod returns true if the pod should be ignored by the operator.
-// The operator should ignore the pods in the following cases:
-// - the pod is in the same namespace as the operator
-// - the pod is in the kube-* namespace
-// - the pod has a node name set
-// - the pod has a node selector that matches the control plane nodes
-// - the pod is owned by a daemonset
-func (pod *Pod) shouldIgnorePod() bool {
-	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
-		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() ||
-		pod.isNodeSelectorConfiguredForArchitecture() || pod.isFromDaemonSet()
+// The operator should ignore the pod in the following cases:
+// - The pod is in the same namespace as the operator.
+// - The pod is in a kube-* namespace.
+// - The pod has a node name set (indicating it's already assigned).
+// - The pod has a node selector that matches control plane nodes
+// - The pod is owned by a DaemonSet.
+// - The ClusterPodPlacementConfig (cppc) is nil, does not define plugins, or NodeAffinityScoring is disabled.
+// - The pod lacks preferred affinity configuration for its architecture while having a node selector configured for architecture.
+
+func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
+	isNodeSelectorConfigured := pod.isNodeSelectorConfiguredForArchitecture()
+
+	// Initial check for conditions that always result in ignoring the pod
+	results := utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
+		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() || isNodeSelectorConfigured || pod.isFromDaemonSet()
+
+	// If results is false, return false immediately
+	if !results {
+		return false
+	}
+
+	// If cppc is nil or plugins are not defined, ignore the pod
+	if cppc == nil || cppc.Spec.Plugins == nil || !cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
+		return true
+	}
+
+	// If NodeAffinityScoring is enabled, check preferred affinity and node selector
+	if !pod.isPreferredAffinityConfiguredForArchitecture() && isNodeSelectorConfigured {
+		return false
+	}
+
+	// Otherwise, do not ignore the pod
+	return true
 }
 
 // ensureSchedulingGate ensures that the pod has the scheduling gate utils.SchedulingGateName.
@@ -428,4 +491,27 @@ func (pod *Pod) handleError(err error, s string) {
 	pod.ensureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
 	pod.publishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+err.Error())
 	log.Error(err, s)
+}
+
+func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
+	if pod.Spec.Affinity == nil {
+		return false
+	}
+
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		return false
+	}
+
+	if pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+		return false
+	}
+
+	for _, term := range pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+		for _, expr := range term.Preference.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				return true
+			}
+		}
+	}
+	return false
 }

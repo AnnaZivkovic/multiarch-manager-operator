@@ -39,6 +39,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement/metrics"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -83,7 +84,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	pod.ensureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
 	pod.ensureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
 
-	if pod.shouldIgnorePod() {
+	if pod.shouldIgnorePod(clusterpodplacementconfig.GetClusterPodPlacementConfig()) {
 		log.V(3).Info("Ignoring the pod")
 		return a.patchedPodResponse(&pod.Pod, req)
 	}

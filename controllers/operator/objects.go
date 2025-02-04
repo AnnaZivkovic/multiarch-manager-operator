@@ -121,7 +121,7 @@ func buildWebhookDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlaceme
 
 func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfig) *appsv1.Deployment {
 	d := buildDeployment(clusterPodPlacementConfig, utils.PodPlacementControllerName, 2, utils.PodPlacementControllerName,
-		utils.PodPlacementFinalizerName, "--leader-elect", "--enable-ppc-controllers",
+		utils.PodPlacementFinalizerName, "--leader-elect", "--enable-ppc-controllers", "--enable-ppc-informer",
 	)
 	d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes,
 		corev1.Volume{
