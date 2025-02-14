@@ -130,6 +130,33 @@ func VerifyPodNodeAffinity(ctx context.Context, client runtimeclient.Client, ns 
 	}
 }
 
+func VerifyPodPreferredNodeAffinity(ctx context.Context, client runtimeclient.Client, ns *v1.Namespace, labelKey string, labelInValue string, preferredSchedulingTerms []v1.PreferredSchedulingTerm) func(gomega.Gomega) {
+	return func(g gomega.Gomega) {
+		r, err := labels.NewRequirement(labelKey, "in", []string{labelInValue})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		labelSelector := labels.NewSelector().Add(*r)
+		pods := &v1.PodList{}
+		err = client.List(ctx, pods, &runtimeclient.ListOptions{
+			Namespace:     ns.Name,
+			LabelSelector: labelSelector,
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(pods.Items).NotTo(BeEmpty())
+
+		if len(preferredSchedulingTerms) == 0 {
+			g.Expect(pods.Items).To(HaveEach(WithTransform(func(p v1.Pod) *v1.Affinity {
+				return p.Spec.Affinity
+			}, BeNil())))
+		} else {
+			g.Expect(pods.Items).To(HaveEach(HaveEquivalentPreferredNodeAffinity(
+				&v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: preferredSchedulingTerms,
+				})))
+		}
+	}
+}
+
 func VerifyDaemonSetPodNodeAffinity(ctx context.Context, client runtimeclient.Client, ns *v1.Namespace, labelKey string, labelInValue string, nodeSelectorRequirement *v1.NodeSelectorRequirement) func(g gomega.Gomega) {
 	return func(g gomega.Gomega) {
 		r, err := labels.NewRequirement(labelKey, "in", []string{labelInValue})

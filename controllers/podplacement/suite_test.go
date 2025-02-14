@@ -59,6 +59,8 @@ import (
 
 	"github.com/panjf2000/ants/v2"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
@@ -325,6 +327,17 @@ func runManager() {
 
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
+
+	err = v1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = v1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Setting up Cluster Podplacement Config informer")
+	err = mgr.Add(NewCPPCSyncer(mgr))
+	Expect(err).NotTo(HaveOccurred())
+	ic := CacheSingleton()
+	Expect(ic.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("Starting the manager")
 	go func() {

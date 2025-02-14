@@ -626,7 +626,7 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 				}).Build(),
 		},
 		{
-			name: "other affinity types should not be modified",
+			name: "other affinity types should not be modified without node affinity plugins enabled",
 			pod: NewPod().WithContainersImages(fake.MultiArchImage).WithAffinity(&v1.Affinity{
 				PodAffinity: &v1.PodAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
@@ -670,6 +670,66 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 										Key:      "foo",
 										Operator: v1.NodeSelectorOpIn,
 										Values:   []string{"bar"},
+									},
+								},
+							},
+						},
+					},
+				},
+			}).WithNodeSelectorTermsMatchExpressions(
+				[]v1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{utils.ArchitectureAmd64, utils.ArchitectureArm64},
+					},
+				}).Build(),
+		},
+		{
+			name: "preferred affinity should not be modified with preexisting archlable",
+			pod: NewPod().WithContainersImages(fake.MultiArchImage).WithAffinity(&v1.Affinity{
+				PodAffinity: &v1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
+						{
+							TopologyKey: "foo",
+						},
+					},
+				},
+				NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+						{
+							Weight: 1,
+							Preference: v1.NodeSelectorTerm{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{utils.ArchitectureAmd64},
+									},
+								},
+							},
+						},
+					},
+				},
+			}).Build(),
+			want: NewPod().WithContainersImages(fake.MultiArchImage).WithAffinity(&v1.Affinity{
+				PodAffinity: &v1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
+						{
+							TopologyKey: "foo",
+						},
+					},
+				},
+				NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+						{
+							Weight: 1,
+							Preference: v1.NodeSelectorTerm{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{utils.ArchitectureAmd64},
 									},
 								},
 							},

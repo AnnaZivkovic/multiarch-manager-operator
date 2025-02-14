@@ -105,11 +105,23 @@ func (p *PodBuilder) WithRequiredDuringSchedulingIgnoredDuringExecution() *PodBu
 	return p
 }
 
-func (p *PodBuilder) WithPreferredDuringSchedulingIgnoredDuringExecution() *PodBuilder {
+func (p *PodBuilder) WithPreferredDuringSchedulingIgnoredDuringExecution(opts ...func(*v1.PreferredSchedulingTerm)) *PodBuilder {
 	p.WithNodeAffinity()
+
 	if p.pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
 		p.pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []v1.PreferredSchedulingTerm{}
 	}
+
+	// Apply each optional function
+	for _, opt := range opts {
+		term := v1.PreferredSchedulingTerm{}
+		opt(&term)
+		p.pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+			p.pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+			term,
+		)
+	}
+
 	return p
 }
 
