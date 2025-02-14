@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+
 	"log"
 	"testing"
 
@@ -21,11 +22,13 @@ import (
 	ocpconfigv1 "github.com/openshift/api/config/v1"
 	ocpoperatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/registry"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 var (
@@ -60,6 +63,18 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	err = client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster",
+		},
+		Spec: v1beta1.ClusterPodPlacementConfigSpec{
+			Plugins: &plugins.Plugins{
+				NodeAffinityScoring: &plugins.NodeAffinityScoring{
+					BasePlugin: plugins.BasePlugin{
+						Enabled: true,
+					},
+					Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+						{Architecture: utils.ArchitectureAmd64, Weight: 50},
+					},
+				},
+			},
 		},
 	})
 	Expect(err).NotTo(HaveOccurred())

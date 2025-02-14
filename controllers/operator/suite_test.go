@@ -56,7 +56,6 @@ import (
 
 	"github.com/openshift/library-go/pkg/operator/events"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 	//+kubebuilder:scaffold:imports
@@ -214,11 +213,6 @@ func runManager() {
 		WebhookServer:          webhookServer,
 	})
 	Expect(err).NotTo(HaveOccurred())
-
-	By("Setting up Cluster Podplacement Config informer")
-	err = mgr.Add(clusterpodplacementconfig.NewCPPCSyncer(mgr))
-	Expect(err).NotTo(HaveOccurred())
-	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	suiteLog.Info("Manager created")
 

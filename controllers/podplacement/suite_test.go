@@ -59,7 +59,12 @@ import (
 
 	"github.com/panjf2000/ants/v2"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
@@ -132,6 +137,43 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	// TODO: should we continue running the manager in the BeforeSuite node?
 	runManager()
 
+	By("Creating the ClusterPodPlacementConfig")
+	err = k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().
+		WithName(common.SingletonResourceObjectName).
+		WithPlugins().
+		WithNodeAffinityScoring(true).
+		WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 50).
+		Build())
+	Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig")
+
+	By("Checking initialization of the cache with the ClusterPodPlacementConfig")
+	ppc := &v1beta1.ClusterPodPlacementConfig{}
+	err = k8sClient.Get(ctx, client.ObjectKey{Name: common.SingletonResourceObjectName}, ppc)
+	Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig")
+
+	// Wait for the informer to update by polling
+	By("Waiting for the cache to reflect the ClusterPodPlacementConfig")
+	Eventually(func() *v1beta1.ClusterPodPlacementConfig {
+		return clusterpodplacementconfig.GetClusterPodPlacementConfig()
+	}).ShouldNot(BeNil(), "cache did not update with ClusterPodPlacementConfig")
+
+	By("Updating the ClusterPodPlacementConfig")
+	ppc.Spec.LogVerbosity = common.LogVerbosityLevelTraceAll
+	err = k8sClient.Update(ctx, ppc)
+	Expect(err).NotTo(HaveOccurred(), "failed to update ClusterPodPlacementConfig")
+
+	By("Waiting for the cache to reflect the updated ClusterPodPlacementConfig")
+	Eventually(func() *v1beta1.ClusterPodPlacementConfig {
+		updatedConfig := clusterpodplacementconfig.GetClusterPodPlacementConfig()
+		if updatedConfig != nil && updatedConfig.Spec.LogVerbosity == common.LogVerbosityLevelTraceAll {
+			return updatedConfig
+		}
+		return nil
+	}).ShouldNot(BeNil(), "cache did not update with new ClusterPodPlacementConfig")
+
+	// Final assertion to ensure the cache is correctly updated
+	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(Equal(ppc))
+
 	By("Prepare shared data and Pass to all processes")
 	// Get cluster info and share with all processes
 	kc := framework.FromEnvTestConfig(cfg)
@@ -175,12 +217,18 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
+	By("Deleting the cache by deleting the ClusterPodPlacementConfig")
+	err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+	Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+	Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
+
 	By("tearing down the test environment")
 	stopMgr()
 	// TODO: we miss a way to gracefully shutdown the registry server in the AfterSuite fixture.
 	// wait for the manager to stop. FIXME: this is a hack, not sure what is the right way to do it.
 	time.Sleep(1 * time.Second)
-	err := testEnv.Stop()
+	err = testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
 
@@ -325,6 +373,16 @@ func runManager() {
 
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
+
+	err = v1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = v1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Setting up Cluster Podplacement Config informer")
+	err = mgr.Add(clusterpodplacementconfig.NewCPPCSyncer(mgr))
+	Expect(err).NotTo(HaveOccurred())
+	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("Starting the manager")
 	go func() {

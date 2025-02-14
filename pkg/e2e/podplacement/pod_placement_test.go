@@ -95,6 +95,13 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
+
 		})
 		It("should set the node affinity on privileged deployments", func() {
 			var err error
@@ -170,6 +177,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when users node affinity do not conflict", func() {
 			var err error
@@ -214,6 +227,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should not set the node affinity when users node affinity conflicts", func() {
 			var err error
@@ -244,6 +263,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should keep the same node affinity provided by the users. No node affinity is added by the controller.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *archLabelNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should check each matchExpressions when users node affinity has multiple matchExpressions", func() {
 			var err error
@@ -291,6 +312,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedHostnameNST, *archLabelNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should neither set the node affinity nor gate pods when nodeSelector exist", func() {
 			var err error
@@ -319,6 +346,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
 		It("should neither set the node affinity not gate pods when nodeName exist", func() {
 			var err error
@@ -352,6 +381,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running and not gated")
 			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("When a statefulset is deployed with single vs multi container images", func() {
@@ -389,6 +420,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when with a single container and a multiarch image", func() {
 			var err error
@@ -428,6 +465,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when with more containers some with singlearch image some with multiarch image", func() {
 			var err error
@@ -463,6 +506,13 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should not set the node affinity when more multiarch image-based containers and users set node affinity", func() {
 			var err error
@@ -494,6 +544,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should keep the same node affinity provided by the users. No node affinity is added by the controller.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when with more containers all with multiarch image", func() {
 			var err error
@@ -529,6 +585,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("PodPlacementOperand works with several high-level resources owning pods", func() {
@@ -595,6 +657,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity on Build owning pod", func() {
 			var err error
@@ -657,6 +725,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("When deploying workloads with public and private images", func() {
@@ -685,6 +759,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not have been set node affinity of arch info becasue pull secret is missing.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity in pods with images requiring credentials set in the global pull secret", func() {
 			if len(masterNodes.Items) == 0 {
@@ -724,6 +800,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity in pods with images requiring credentials set in pods imagePullSecrets", func() {
 			var err error
@@ -778,6 +860,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity in pods with images that require both global and local pull secrets", func() {
 			if len(masterNodes.Items) == 0 {
@@ -825,6 +913,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.SingleArchLabel, "",
@@ -868,6 +962,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
 			By("The pod should get node affinity of arch info beucase registry is added in insecure list.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
@@ -904,6 +1004,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not get node affinity of arch info beucase registry certificate is not in the trusted anchors.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when registry certificate is added in the trusted anchors", func() {
 			var err error
@@ -935,6 +1037,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should get node affinity of arch info because registry certificate is added in the trusted anchors.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.MultiArchLabel, "",
@@ -970,6 +1078,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test-block", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not get node affinity of arch info beucase registry is in blocked list.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test-block"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test-block", nil), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
@@ -1008,6 +1118,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should get node affinity of arch info because the mirror registries are functional.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.MultiArchLabel, "",
@@ -1049,6 +1165,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should get node affinity of arch info because the mirror registries are functional.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.MultiArchLabel, "",
@@ -1090,6 +1212,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should get node affinity of arch info even if mirror registries down but AllowContactingSource enabled and source is functional.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			archLabelNSR = NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
+			expectedNSTs = NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 			By("Verify arch label are set")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.MultiArchLabel, "",
@@ -1126,6 +1254,8 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not get node affinity of arch info because mirror registries are down and NeverContactSource is enabled.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the expected preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
 		})
 	})
 })

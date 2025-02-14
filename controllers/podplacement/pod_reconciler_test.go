@@ -384,4 +384,183 @@ var _ = Describe("Controllers/Podplacement/PodReconciler", func() {
 			)
 		})
 	})
+	When("The node affinity scoring plugin is enabled", func() {
+		Context("with different types of preferred affinities", func() {
+			It("appends ClusterPodPlacementConfig node affinity to nil preferred affinities", func() {
+				pod := NewPod().
+					WithContainersImages("nginx:latest").
+					WithGenerateName("test-pod-").
+					WithNamespace("test-namespace").
+					Build()
+				err := k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+				Eventually(func(g Gomega) {
+					// Get pod from the API server
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						&corev1.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+								{
+									Weight: int32(50),
+									Preference: corev1.NodeSelectorTerm{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      utils.ArchLabel,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{utils.ArchitectureArm64},
+											},
+										},
+									},
+								},
+							},
+						}),
+						"unexpected preferred node affinity")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+			It("appends ClusterPodPlacementConfig node affinity to predefined preferred affinities", func() {
+				preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+					Weight: int32(20),
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      "foo",
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"bar"},
+							},
+						},
+					},
+				}
+				pod := NewPod().
+					WithContainersImages("nginx:latest").
+					WithGenerateName("test-pod-").
+					WithNamespace("test-namespace").
+					WithPreferredDuringSchedulingIgnoredDuringExecution(&preferredSchedulingTerm).
+					Build()
+				err := k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+				Eventually(func(g Gomega) {
+					// Get pod from the API server
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod")
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						&corev1.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+								{
+									Weight: int32(20),
+									Preference: corev1.NodeSelectorTerm{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      "foo",
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{"bar"},
+											},
+										},
+									},
+								},
+								{
+									Weight: int32(50),
+									Preference: corev1.NodeSelectorTerm{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      utils.ArchLabel,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{utils.ArchitectureArm64},
+											},
+										},
+									},
+								},
+							},
+						}),
+						"unexpected preferred node affinity")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+			It("skips appending the ClusterPodPlacementConfig node affinity to the predefined preferred affinities", func() {
+				preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+					Weight: int32(10),
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{utils.ArchitectureArm64},
+							},
+						},
+					},
+				}
+				pod := NewPod().
+					WithContainersImages("nginx:latest").
+					WithGenerateName("test-pod-").
+					WithNamespace("test-namespace").
+					WithPreferredDuringSchedulingIgnoredDuringExecution(&preferredSchedulingTerm).
+					Build()
+				err := k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod")
+				Eventually(func(g Gomega) {
+					// Get pod from the API server
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						&corev1.NodeAffinity{
+							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+								{
+									Weight: int32(10),
+									Preference: corev1.NodeSelectorTerm{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      utils.ArchLabel,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{utils.ArchitectureArm64},
+											},
+										},
+									},
+								},
+							},
+						}),
+						"unexpected preferred node affinity")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+		})
+	})
 })

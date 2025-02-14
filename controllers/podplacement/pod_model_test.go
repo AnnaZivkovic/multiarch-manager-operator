@@ -12,6 +12,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement/metrics"
 	mmoimage "github.com/openshift/multiarch-tuning-operator/pkg/image"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake"
@@ -704,7 +705,6 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 		},
 	}
 	metrics.InitPodPlacementControllerMetrics()
-	cache := CacheSingleton()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
@@ -712,7 +712,7 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 				Pod: *tt.pod,
 				ctx: ctx,
 			}
-			_, err := pod.SetNodeAffinityArchRequirement(cache, tt.pullSecretDataList)
+			_, err := pod.SetNodeAffinityArchRequirement(tt.pullSecretDataList)
 			g := NewGomegaWithT(t)
 			if tt.expectErr {
 				g.Expect(err).Should(HaveOccurred())
@@ -1048,7 +1048,7 @@ func TestPod_shouldIgnorePod(t *testing.T) {
 				ctx:      tt.fields.ctx,
 				recorder: tt.fields.recorder,
 			}
-			if got := pod.shouldIgnorePod(false); got != tt.want {
+			if got := pod.shouldIgnorePod(&v1beta1.ClusterPodPlacementConfig{}); got != tt.want {
 				t.Errorf("shouldIgnorePod() = %v, want %v", got, tt.want)
 			}
 		})

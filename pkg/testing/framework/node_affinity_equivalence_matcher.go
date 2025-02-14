@@ -109,3 +109,87 @@ func sortMatchExpressions(nst []corev1.NodeSelectorTerm) []corev1.NodeSelectorTe
 	})
 	return nst
 }
+
+func HaveEquivalentPreferredNodeAffinity(expected *corev1.NodeAffinity) types.GomegaMatcher {
+	return &equivalentPreferredNodeAffinityMatcher{
+		expected: expected,
+	}
+}
+
+type equivalentPreferredNodeAffinityMatcher struct {
+	expected interface{}
+}
+
+func (matcher *equivalentPreferredNodeAffinityMatcher) Match(actual interface{}) (bool, error) {
+	actualPod, ok := actual.(corev1.Pod)
+	if !ok {
+		return false, fmt.Errorf("HaveEquivalentNodeAffinity matcher expects a *corev1.Pod in the actual value, got %T", actual)
+	}
+	expectedNodeAffinity, ok := matcher.expected.(*corev1.NodeAffinity)
+	if !ok {
+		return false, fmt.Errorf("HaveEquivalentNodeAffinity matcher expects a *corev1.NodeAffinity")
+	}
+	var actualNodeAffinity *corev1.NodeAffinity
+	if actualPod.Spec.Affinity != nil && actualPod.Spec.Affinity.NodeAffinity != nil {
+		actualNodeAffinity = actualPod.Spec.Affinity.NodeAffinity
+	}
+
+	if actualNodeAffinity == nil && expectedNodeAffinity == nil {
+		return true, nil
+	}
+	if actualNodeAffinity == nil || expectedNodeAffinity == nil {
+		return false, fmt.Errorf("expectedNodeAffinity: %+v, actualNodeAffinity: %+v", expectedNodeAffinity, actualNodeAffinity)
+	}
+
+	if actualNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil && expectedNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+		return true, nil
+	}
+	if actualNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil || expectedNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+		return false, fmt.Errorf("expectedNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution: %+v, "+
+			"actualNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution: %+v",
+			expectedNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+			actualNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+	}
+
+	actualTerms := actualNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	expectedTerms := expectedNodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+
+	return matchPreferredNodeAffinity(actualTerms, expectedTerms), nil
+}
+
+func (matcher *equivalentPreferredNodeAffinityMatcher) FailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected pod to have equivalent preferred node affinity: %+v", matcher.expected)
+}
+
+func (matcher *equivalentPreferredNodeAffinityMatcher) NegatedFailureMessage(actual interface{}) string {
+	return fmt.Sprintf("Expected pod NOT to have equivalent preferred node affinity: %+v", matcher.expected)
+}
+
+func matchPreferredNodeAffinity(actualTerms, expectedTerms []corev1.PreferredSchedulingTerm) bool {
+	if len(actualTerms) != len(expectedTerms) {
+		return false
+	}
+
+	// Sort by weight to ensure a consistent comparison order
+	sort.SliceStable(actualTerms, func(i, j int) bool {
+		return actualTerms[i].Weight < actualTerms[j].Weight
+	})
+	sort.SliceStable(expectedTerms, func(i, j int) bool {
+		return expectedTerms[i].Weight < expectedTerms[j].Weight
+	})
+
+	// Compare all preferred scheduling terms
+	for i := range actualTerms {
+		if actualTerms[i].Weight != expectedTerms[i].Weight {
+			return false
+		}
+		if !reflect.DeepEqual(actualTerms[i].Preference.MatchExpressions, expectedTerms[i].Preference.MatchExpressions) {
+			return false
+		}
+		if !reflect.DeepEqual(actualTerms[i].Preference.MatchFields, expectedTerms[i].Preference.MatchFields) {
+			return false
+		}
+	}
+
+	return true
+}
