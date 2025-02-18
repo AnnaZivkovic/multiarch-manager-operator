@@ -11,7 +11,6 @@ import (
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 
@@ -360,61 +359,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 					Build(),
 			)
 			Expect(err).To(HaveOccurred(), "the ClusterPodPlacementConfig should not be accepted", err)
-		})
-	})
-	Context("with different types of preferred affinities", func() {
-		BeforeEach(func() {
-			By("set NodeAffinityScoring Plugin for ClusterPodPlacementConfig")
-			err := client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster",
-				},
-				Spec: v1beta1.ClusterPodPlacementConfigSpec{
-					Plugins: &plugins.Plugins{
-						NodeAffinityScoring: &plugins.NodeAffinityScoring{
-							BasePlugin: plugins.BasePlugin{
-								Enabled: true,
-							},
-							Platforms: []plugins.NodeAffinityScoringPlatformTerm{
-								{Architecture: utils.ArchitectureAmd64, Weight: 50},
-							},
-						},
-					}}})
-			Expect(err).NotTo(HaveOccurred())
-			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
-		})
-		It("appends ClusterPodPlacementConfig node affinity to nil preferred affinities", func() {
-			var err error
-			By("Create an ephemeral namespace")
-			ns := framework.NewEphemeralNamespace()
-			err = client.Create(ctx, ns)
-			Expect(err).NotTo(HaveOccurred())
-			//nolint:errcheck
-			defer client.Delete(ctx, ns)
-			By("Create a deployment using the single container with a public multiarch image")
-			ps := NewPodSpec().
-				WithContainersImages(helloOpenshiftPublicMultiarchImage).
-				Build()
-			d := NewDeployment().
-				WithSelectorAndPodLabels(podLabel).
-				WithPodSpec(ps).
-				WithReplicas(utils.NewPtr(int32(1))).
-				WithName("test-deployment").
-				WithNamespace(ns.Name).
-				Build()
-			err = client.Create(ctx, d)
-			Expect(err).NotTo(HaveOccurred())
-
-			archLabelNSR := NewNodeSelectorRequirement().
-				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).Build()
-			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
-			preferredSchedulingTerm := NewPreferredSchedulingTerm().WithKeyAndValues(50, *expectedNSTs).Build()
-
-			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
-			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
-
-			By("The pod should have been set node affinity of arch info.")
-			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{*preferredSchedulingTerm}), e2e.WaitShort).Should(Succeed())
 		})
 	})
 })
