@@ -116,8 +116,11 @@ func VerifyPodNodeAffinity(ctx context.Context, client runtimeclient.Client, ns 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(pods.Items).NotTo(BeEmpty())
 		if len(nodeSelectorTerms) == 0 {
-			g.Expect(pods.Items).To(HaveEach(WithTransform(func(p v1.Pod) *v1.Affinity {
-				return p.Spec.Affinity
+			g.Expect(pods.Items).To(HaveEach(WithTransform(func(p v1.Pod) *v1.NodeSelector {
+				if p.Spec.Affinity == nil || p.Spec.Affinity.NodeAffinity == nil {
+					return nil
+				}
+				return p.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 			}, BeNil())))
 		} else {
 			g.Expect(pods.Items).To(HaveEach(HaveEquivalentNodeAffinity(
