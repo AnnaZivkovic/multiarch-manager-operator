@@ -119,6 +119,10 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
+	if cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
+		pod.SetPreferredArchNodeAffinity(cppc)
+	}
+
 	// Prepare the requirement for the node affinity.
 	psdl, err := r.pullSecretDataList(ctx, pod)
 	pod.handleError(err, "Unable to retrieve the image pull secret data for the pod.")
@@ -135,10 +139,6 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// Publish this event and remove the scheduling gate.
 		log.Info("Max retries Reached. The pod will not have the nodeAffinity set.")
 		pod.publishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
-	}
-
-	if err == nil && cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
-		pod.SetPreferredArchNodeAffinity(cppc)
 	}
 
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.

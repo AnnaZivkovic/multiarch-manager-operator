@@ -734,7 +734,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 		})
 	})
 	Context("When deploying workloads with public and private images", func() {
-		It("should not set the node affinity if missing a pull secret", func() {
+		It("should not set the required node affinity if missing a pull secret", func() {
 			var err error
 			By("Create an ephemeral namespace")
 			ns := framework.NewEphemeralNamespace()
@@ -757,10 +757,11 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Expect(err).NotTo(HaveOccurred())
 			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
-			By("The pod should not have been set node affinity of arch info becasue pull secret is missing.")
+			By("The pod should not have been set node affinity of arch info because pull secret is missing.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
-			By("The pod should have the expected preferred affinities")
-			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity in pods with images requiring credentials set in the global pull secret", func() {
 			if len(masterNodes.Items) == 0 {
@@ -1004,8 +1005,9 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not get node affinity of arch info beucase registry certificate is not in the trusted anchors.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
-			By("The pod should have the expected preferred affinities")
-			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", []corev1.PreferredSchedulingTerm{}), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity when registry certificate is added in the trusted anchors", func() {
 			var err error
@@ -1076,10 +1078,11 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Expect(err).NotTo(HaveOccurred())
 			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test-block", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
-			By("The pod should not get node affinity of arch info beucase registry is in blocked list.")
+			By("The pod should not get node affinity of arch info because registry is in blocked list.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test-block"), e2e.WaitShort).Should(Succeed())
-			By("The pod should have the expected preferred affinities")
-			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test-block", nil), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
