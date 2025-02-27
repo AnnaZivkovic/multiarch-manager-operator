@@ -238,7 +238,6 @@ func RunClusterPodPlacementConfigOperandControllers(mgr ctrl.Manager) {
 		}
 		setupLog.Info("CPPCSyncer is enabled")
 	}
-
 	must(mgr.Add(podplacement.NewGlobalPullSecretSyncer(clientset, globalPullSecretNamespace, globalPullSecretName)),
 		unableToAddRunnable, runnableKey, "GlobalPullSecretSyncer")
 }
@@ -256,7 +255,6 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		ants.Release()
 	})
-
 	if enableCPPCInformer {
 		cppcSyncer := clusterpodplacementconfig.NewCPPCSyncer(mgr)
 		if err := mgr.Add(cppcSyncer); err != nil {
@@ -265,7 +263,6 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		setupLog.Info("CPPCSyncer is enabled")
 	}
-
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
