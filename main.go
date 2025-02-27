@@ -256,6 +256,16 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		ants.Release()
 	})
+
+	if enableCPPCInformer {
+		cppcSyncer := clusterpodplacementconfig.NewCPPCSyncer(mgr)
+		if err := mgr.Add(cppcSyncer); err != nil {
+			setupLog.Error(err, "unable to add CPPCSyncer")
+			os.Exit(1)
+		}
+		setupLog.Info("CPPCSyncer is enabled")
+	}
+
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
@@ -286,7 +296,7 @@ func bindFlags() {
 	flag.BoolVar(&enableClusterPodPlacementConfigOperandWebHook, "enable-ppc-webhook", false, "Enable the pod placement config operand webhook")
 	flag.BoolVar(&enableClusterPodPlacementConfigOperandControllers, "enable-ppc-controllers", false, "Enable the pod placement config operand controllers")
 	flag.BoolVar(&enableOperator, "enable-operator", false, "Enable the operator")
-	flag.BoolVar(&enableCPPCInformer, "enable-ppc-informer", false, "Enable informer for ClusterPodPlacementConfig")
+	flag.BoolVar(&enableCPPCInformer, "enable-cppc-informer", false, "Enable informer for ClusterPodPlacementConfig")
 	// This may be deprecated in the future. It is used to support the current way of setting the log level for operands
 	// If operands will start to support a controller that watches the ClusterPodPlacementConfig, this flag may be removed
 	// and the log level will be set in the ClusterPodPlacementConfig at runtime (with no need for reconciliation)
