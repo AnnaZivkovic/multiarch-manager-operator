@@ -66,17 +66,11 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 		},
 		Spec: v1beta1.ClusterPodPlacementConfigSpec{
 			Plugins: &plugins.Plugins{
-				NodeAffinityScoring: &plugins.NodeAffinityScoring{
-					BasePlugin: plugins.BasePlugin{
-						Enabled: true,
-					},
-					Platforms: []plugins.NodeAffinityScoringPlatformTerm{
-						{Architecture: utils.ArchitectureAmd64, Weight: 50},
-					},
-				},
+				NodeAffinityScoring: defaultNodeAffinityScoring(),
 			},
 		},
 	})
+
 	Expect(err).NotTo(HaveOccurred())
 	Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
 	updateGlobalPullSecret()
@@ -116,6 +110,27 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 		framework.WaitForMCPComplete(ctx, client)
 	}
 })
+
+func defaultExpectedAffinityTerms() []corev1.PreferredSchedulingTerm {
+	return NewPreferredSchedulingTerms().
+		WithArchitectureWeight(utils.ArchitectureAmd64, 50).
+		Build()
+}
+
+func defaultNodeAffinityScoring() *plugins.NodeAffinityScoring {
+	ret := &plugins.NodeAffinityScoring{
+		BasePlugin: plugins.BasePlugin{
+			Enabled: true,
+		},
+	}
+	for _, term := range defaultExpectedAffinityTerms() {
+		ret.Platforms = append(ret.Platforms, plugins.NodeAffinityScoringPlatformTerm{
+			Architecture: term.Preference.MatchExpressions[0].Values[0],
+			Weight:       term.Weight,
+		})
+	}
+	return ret
+}
 
 // updateGlobalPullSecret patches the global pull secret to onboard the
 // read-only credentials of the quay.io org. for testing images stored
