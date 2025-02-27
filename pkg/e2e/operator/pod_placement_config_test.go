@@ -120,6 +120,9 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Absent, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
 			By("The pod should not have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should not have preferred affinities")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				nil), e2e.WaitShort).Should(Succeed())
 		})
 		It("should handle namespaces that do not have the opt-out label", func() {
 			var err error
@@ -246,6 +249,9 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("No preferred affinities should be set (the plugin is not enabled)")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				nil), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("The webhook should not gate pods with node selectors that pin them to the control plane", func() {
@@ -296,6 +302,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Entry(utils.MasterNodeSelectorLabel, utils.MasterNodeSelectorLabel),
 		)
 	})
+	// TODO[tori]: It("Should ignore pods with already set required node affinity when the nodeAffinityScoring plugin is disabled")
 	Context("When a pod placement config is created", func() {
 		It("should create a v1beta1 CPPC with plugins and succeed getting the v1alpha1 version of the CPPC", func() {
 			By("Creating the ClusterPodPlacementConfig")
@@ -326,6 +333,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				Name: common.SingletonResourceObjectName,
 			}, v1alpha1obj)
 			Expect(err).NotTo(HaveOccurred(), "failed to get the v1alpha1 version of the ClusterPodPlacementConfig", err)
+			// TODO[tori] Add more validation. After the operator reconciles the operand, we should validate that both the required and preferred node affinities.
 		})
 		It("should succeed creating a v1alpha1 CPPC and get the v1beta1 version with no plugins field", func() {
 			By("Creating a v1alpha1 ClusterPodPlacementConfig")

@@ -373,33 +373,13 @@ func (pod *Pod) hasControlPlaneNodeSelector() bool {
 // - The pod has a node name set (indicating it's already assigned).
 // - The pod has a node selector that matches control plane nodes
 // - The pod is owned by a DaemonSet.
-// - The ClusterPodPlacementConfig (cppc) is nil, does not define plugins, or NodeAffinityScoring is disabled.
-// - The pod lacks preferred affinity configuration for its architecture while having a node selector configured for architecture.
-
+// - Both the nodeSelector and the preferredAffinity are set for the kubernetes.io/arch label.
+// - Only the nodeSelector is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled.
 func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
-	isNodeSelectorConfigured := pod.isNodeSelectorConfiguredForArchitecture()
-
-	// Initial check for conditions that always result in ignoring the pod
-	results := utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
-		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() || isNodeSelectorConfigured || pod.isFromDaemonSet()
-
-	// If results is false, return false immediately
-	if !results {
-		return false
-	}
-
-	// If cppc is nil or plugins are not defined, ignore the pod
-	if cppc == nil || cppc.Spec.Plugins == nil || !cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
-		return true
-	}
-
-	// If NodeAffinityScoring is enabled, check preferred affinity and node selector
-	if !pod.isPreferredAffinityConfiguredForArchitecture() && isNodeSelectorConfigured {
-		return false
-	}
-
-	// Otherwise, do not ignore the pod
-	return true
+	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
+		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() || pod.isFromDaemonSet() ||
+		pod.isNodeSelectorConfiguredForArchitecture() && (pod.isPreferredAffinityConfiguredForArchitecture() ||
+			cppc.Spec.Plugins == nil || !cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled())
 }
 
 // ensureSchedulingGate ensures that the pod has the scheduling gate utils.SchedulingGateName.
@@ -494,15 +474,8 @@ func (pod *Pod) handleError(err error, s string) {
 }
 
 func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
-	if pod.Spec.Affinity == nil {
-		return false
-	}
-
-	if pod.Spec.Affinity.NodeAffinity == nil {
-		return false
-	}
-
-	if pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
 		return false
 	}
 
