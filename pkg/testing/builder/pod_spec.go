@@ -144,6 +144,12 @@ func (ps *PodSpecBuilder) WithNodeSelectors(entries map[string]string) *PodSpecB
 	return ps
 }
 
+func (ps *PodSpecBuilder) WithPreferredNodeAffinities(preferredNodeAffinities ...v1.PreferredSchedulingTerm) *PodSpecBuilder {
+	ps.WithNodeAffinity()
+	ps.podspec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = preferredNodeAffinities
+	return ps
+}
+
 func (ps *PodSpecBuilder) Build() v1.PodSpec {
 	return ps.podspec
 }

@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -19,6 +20,22 @@ func NewPreferredSchedulingTerm() *PreferredSchedulingTermBuilder {
 func (p *PreferredSchedulingTermBuilder) WithKeyAndValues(weight int, nodeSelectorTerm v1.NodeSelectorTerm) *PreferredSchedulingTermBuilder {
 	p.preferredSchedulingTerm.Weight = int32(weight)
 	p.preferredSchedulingTerm.Preference = nodeSelectorTerm
+	return p
+}
+
+func (p *PreferredSchedulingTermBuilder) WithArchitecture(architecture string) *PreferredSchedulingTermBuilder {
+	p.preferredSchedulingTerm.Preference.MatchExpressions = []v1.NodeSelectorRequirement{
+		{
+			Key:      utils.ArchLabel,
+			Operator: v1.NodeSelectorOpIn,
+			Values:   []string{architecture},
+		},
+	}
+	return p
+}
+
+func (p *PreferredSchedulingTermBuilder) WithWeight(weight int32) *PreferredSchedulingTermBuilder {
+	p.preferredSchedulingTerm.Weight = weight
 	return p
 }
 
