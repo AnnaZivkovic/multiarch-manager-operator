@@ -2,6 +2,8 @@ package podplacement
 
 import (
 	"context"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"reflect"
 	"sort"
 	"testing"
@@ -721,6 +723,183 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 			}
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
+		})
+	}
+}
+
+func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
+	tests := []struct {
+		name               string
+		pullSecretDataList [][]byte
+		pod                *v1.Pod
+		want               *v1.Pod
+		expectErr          bool
+	}{
+		{
+			name: "pod with no preferred affinity terms",
+			pod:  NewPod().WithContainersImages(fake.MultiArchImage).Build(),
+			want: NewPod().WithContainersImages(fake.MultiArchImage).WithAffinity(&v1.Affinity{
+				NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+						{
+							Weight: 50,
+							Preference: v1.NodeSelectorTerm{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{utils.ArchitectureAmd64},
+									},
+								},
+							},
+						},
+					},
+				},
+			}).Build(),
+		},
+		{
+			name: "pod with preferred affinity architecture already set",
+			pod: NewPod().WithContainersImages(fake.MultiArchImage).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				&v1.PreferredSchedulingTerm{
+					Weight: 10,
+					Preference: v1.NodeSelectorTerm{
+						MatchExpressions: []v1.NodeSelectorRequirement{{
+							Key:      utils.ArchLabel,
+							Operator: v1.NodeSelectorOpIn,
+							Values:   []string{utils.ArchitectureArm64},
+						}},
+					},
+				},
+			).Build(),
+			want: NewPod().WithContainersImages(fake.MultiArchImage).WithAffinity(&v1.Affinity{
+				NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+						{
+							Weight: 10,
+							Preference: v1.NodeSelectorTerm{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: v1.NodeSelectorOpIn,
+										Values:   []string{utils.ArchitectureArm64},
+									},
+								},
+							},
+						},
+					},
+				},
+			}).Build(),
+		},
+	}
+	metrics.InitPodPlacementControllerMetrics()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imageInspectionCache = fake.FacadeSingleton()
+			pod := &Pod{
+				Pod: *tt.pod,
+				ctx: ctx,
+			}
+			pod.SetPreferredArchNodeAffinity(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+				Spec: v1beta1.ClusterPodPlacementConfigSpec{
+					LogVerbosity: "Normal",
+					Plugins: &plugins.Plugins{
+						NodeAffinityScoring: &plugins.NodeAffinityScoring{
+							BasePlugin: plugins.BasePlugin{
+								Enabled: true,
+							},
+							Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+								{Architecture: utils.ArchitectureAmd64, Weight: 50},
+							},
+						},
+					},
+				},
+			})
+			g := NewGomegaWithT(t)
+			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
+			imageInspectionCache = mmoimage.FacadeSingleton()
+		})
+	}
+}
+
+func TestPod_isPreferredAffinityConfiguredForArchitecture(t *testing.T) {
+	tests := []struct {
+		name     string
+		affinity *v1.Affinity
+		expected bool
+	}{
+		{
+			name:     "Has no affinity set",
+			affinity: nil,
+			expected: false,
+		},
+		{
+			name:     "Has No Affinity.NodeAffinity set",
+			affinity: &v1.Affinity{},
+			expected: false,
+		},
+		{
+			name:     "Has No Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution set",
+			affinity: &v1.Affinity{NodeAffinity: &v1.NodeAffinity{}},
+			expected: false,
+		},
+		{
+			name: "Has PreferredDuringSchedulingIgnoredDuringExecution set",
+			affinity: &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+					{
+						Weight: 10,
+						Preference: v1.NodeSelectorTerm{
+							MatchExpressions: []v1.NodeSelectorRequirement{
+								{
+									Key:      "foo",
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{"bar"},
+								},
+							},
+						},
+					},
+				},
+			}},
+			expected: false,
+		},
+		{
+			name: "Has PreferredDuringSchedulingIgnoredDuringExecution set with kubernetes.io/arch",
+			affinity: &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{
+					{
+						Weight: 10,
+						Preference: v1.NodeSelectorTerm{
+							MatchExpressions: []v1.NodeSelectorRequirement{
+								{
+									Key:      utils.ArchLabel,
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{utils.ArchitectureArm64},
+								},
+							},
+						},
+					},
+				},
+			}},
+			expected: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &Pod{
+				Pod: v1.Pod{
+					Spec: v1.PodSpec{
+						Affinity: test.affinity,
+					},
+				},
+			}
+
+			result := pod.isPreferredAffinityConfiguredForArchitecture()
+			if result != test.expected {
+				t.Errorf("expected %v, got %v", test.expected, result)
+			}
 		})
 	}
 }

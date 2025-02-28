@@ -172,7 +172,6 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
-// TODO[Tori]: Missing unit tests for this method.
 func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementConfig) {
 	// Prevent overriding of user-provided kubernetes.io/arch preferred affinities
 	if pod.isPreferredAffinityConfiguredForArchitecture() {
@@ -485,7 +484,6 @@ func (pod *Pod) handleError(err error, s string) {
 }
 
 // TODO[Tori] Missing godoc
-// TODO[Tori] Missing unit tests
 func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
 	if pod.Spec.Affinity == nil ||
 		pod.Spec.Affinity.NodeAffinity == nil ||
