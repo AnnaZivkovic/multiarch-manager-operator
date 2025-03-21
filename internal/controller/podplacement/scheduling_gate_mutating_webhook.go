@@ -38,8 +38,7 @@ import (
 
 	"github.com/panjf2000/ants/v2"
 
-	"github.com/openshift/multiarch-tuning-operator/api/common"
-	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
+	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -72,8 +71,10 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	a.once.Do(func() {
 		a.decoder = admission.NewDecoder(a.scheme)
 	})
-	pod := newPod(&corev1.Pod{}, ctx, a.recorder)
-
+	pod := &Pod{
+		ctx:      ctx,
+		recorder: nil, // do we want to publish events if the pod is ignored?
+	}
 	err := a.decoder.Decode(req, &pod.Pod)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
@@ -81,15 +82,15 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	log := ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name)
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
+	if cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
+		pod.ensureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
 	}
-	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
-	pod.EnsureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
+	pod.ensureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
+	pod.ensureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
 
 	if pod.shouldIgnorePod(cppc) {
 		log.V(3).Info("Ignoring the pod")
-		return a.patchedPodResponse(pod.PodObject(), req)
+		return a.patchedPodResponse(&pod.Pod, req)
 	}
 
 	pod.ensureSchedulingGate()
@@ -106,7 +107,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	metrics.GatedPods.Inc()
 	metrics.GatedPodsGauge.Inc()
 	log.V(2).Info("Accepting pod")
-	return a.patchedPodResponse(pod.PodObject(), req)
+	return a.patchedPodResponse(&pod.Pod, req)
 }
 
 func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx context.Context, pod *corev1.Pod) {
