@@ -1,6 +1,5 @@
 # TODO: delete this Dockerfile when https://issues.redhat.com/browse/KONFLUX-2361
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.25 as builder
-ARG TARGETOS
+FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23 as builder
 ARG TARGETARCH
 ENV GOEXPERIMENT=strictfipsruntime
 
@@ -14,9 +13,9 @@ COPY vendor/ vendor/
 #RUN go mod download
 
 # Copy the go source
-COPY cmd/ cmd/
-COPY api/ api/
-COPY internal/ internal/
+COPY main.go main.go
+COPY apis/ apis/
+COPY controllers/ controllers/
 COPY pkg/ pkg/
 
 # Build
@@ -24,22 +23,19 @@ COPY pkg/ pkg/
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager main.go
 
-FROM registry.redhat.io/ubi9/ubi-minimal:latest
+FROM registry.redhat.io/rhel9-2-els/rhel:9.2
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/enoexec-daemon .
 COPY LICENSE /licenses/license.txt
 
 USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
-LABEL name="multiarch-tuning/multiarch-tuning-rhel9-operator"
-LABEL release="1.2.2"
-LABEL version="1.2.2"
-LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
+LABEL name="multiarch-tuning-operator"
+LABEL release="1.1.0"
+LABEL version="1.0.0"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."
 LABEL description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \
