@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package handler
+package operator
 
 import (
 	"context"
@@ -24,13 +24,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+
+	"sigs.k8s.io/kustomize/api/resmap"
+
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/klog/v2"
+
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
+
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,42 +48,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/kustomize/api/krusty"
-	"sigs.k8s.io/kustomize/api/resmap"
-	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	"go.uber.org/zap/zapcore"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
-	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
+	"github.com/openshift/library-go/pkg/operator/events"
+
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
-
 	//+kubebuilder:scaffold:imports
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg          *rest.Config
-	k8sClient    client.Client
-	k8sClientSet *kubernetes.Clientset
-	stopMgr      context.CancelFunc
-	testEnv      *envtest.Environment
-	ctx          context.Context
-	suiteLog     = ctrl.Log.WithName("setup")
-)
-
-const (
-	testNamespace     = "test-namespace"
-	testContainerName = "test-container"
-	testContainerID   = "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-	testNodeName      = "test-node"
-	testNodeArch      = utils.ArchitecturePpc64le
-	testCommand       = "foo-binary"
+	cfg       *rest.Config
+	k8sClient client.Client
+	stopMgr   context.CancelFunc
+	testEnv   *envtest.Environment
+	ctx       context.Context
+	suiteLog  = ctrl.Log.WithName("setup")
 )
 
 func init() {
@@ -82,7 +80,7 @@ func init() {
 
 func TestOperator(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Controllers Integration Suite", Label("integration", "integration-enoexec-handler"))
+	RunSpecs(t, "Operator Integration Suite", Label("integration", "operator"))
 }
 
 var _ = BeforeAll
@@ -94,10 +92,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	SetDefaultEventuallyPollingInterval(5 * time.Millisecond)
 	SetDefaultEventuallyTimeout(5 * time.Second)
 	startTestEnv()
-	testingutils.EnsureNamespaces(ctx, k8sClient, testNamespace)
-	node := builder.NewNodeBuilder().WithName(testNodeName).WithLabel(utils.ArchLabel, testNodeArch).Build()
-	Expect(k8sClient.Create(ctx, node)).To(Succeed(), "failed to create test node")
-
+	testingutils.EnsureNamespaces(ctx, k8sClient, "test-namespace")
 	runManager()
 	kc := testingutils.FromEnvTestConfig(cfg)
 	data, err := json.Marshal(kc)
@@ -122,10 +117,6 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
-
-	k8sClientSet, err = kubernetes.NewForConfig(cfg)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClientSet).NotTo(BeNil())
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
@@ -140,7 +131,7 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 func startTestEnv() {
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 	}
 	var err error
@@ -154,13 +145,9 @@ func startTestEnv() {
 	Expect(k8sClient).NotTo(BeNil())
 	//+kubebuilder:scaffold:scheme
 
-	k8sClientSet, err = kubernetes.NewForConfig(cfg)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClientSet).NotTo(BeNil())
-
 	klog.Info("Applying CRDs to the test environment")
 	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), filepath.Join("..", "..", "..", "..", "config", "crd"))
+	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), filepath.Join("..", "..", "config", "crd"))
 	Expect(err).NotTo(HaveOccurred())
 	err = applyResources(resMap)
 	Expect(err).NotTo(HaveOccurred())
@@ -215,23 +202,39 @@ func applyResources(resources resmap.ResMap) error {
 
 func runManager() {
 	By("Creating the manager")
-
+	webhookServer := webhook.NewServer(webhook.Options{
+		Port:    testEnv.WebhookInstallOptions.LocalServingPort,
+		Host:    testEnv.WebhookInstallOptions.LocalServingHost,
+		CertDir: testEnv.WebhookInstallOptions.LocalServingCertDir,
+	})
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme.Scheme,
 		HealthProbeBindAddress: ":4980",
 		Logger:                 suiteLog,
+		WebhookServer:          webhookServer,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
 	suiteLog.Info("Manager created")
 
+	clientset := kubernetes.NewForConfigOrDie(cfg)
+
+	By("Setting up ClusterPodPlacementConfig controller")
+	ctrlref, err := events.GetControllerReferenceForCurrentPod(context.TODO(), clientset, utils.Namespace(), nil)
+	if err != nil {
+		suiteLog.Error(err, "unable to get controller reference for current pod (falling back to namespace)")
+	}
+	Expect((&ClusterPodPlacementConfigReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ClientSet:     clientset,
+		DynamicClient: dynamic.NewForConfigOrDie(cfg),
+		Recorder:      events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}),
+	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
+
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"))
-	if err = reconciler.SetupWithManager(mgr); err != nil {
-		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
-	}
 	By("Starting the manager")
 	go func() {
 		var mgrCtx context.Context
