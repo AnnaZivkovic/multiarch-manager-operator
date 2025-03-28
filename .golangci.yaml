@@ -42,10 +42,10 @@ linters:
           disabled: false
     staticcheck:
       checks:
+        - -ST1000
         - all
-        - -ST1000  # Ignore missing package comments
-        - -ST1016  # Ignore receiver name inconsistency
-        - -ST1001  # Ignore dot imports
+      dot-import-whitelist:
+        - github.com/onsi/gomega
   exclusions:
     generated: lax
     rules:
@@ -60,8 +60,6 @@ linters:
       - third_party$
       - builtin$
       - examples$
-      - vendor/
-      - zz_generated*
 formatters:
   enable:
     - gofmt
@@ -72,5 +70,3 @@ formatters:
       - third_party$
       - builtin$
       - examples$
-run:
-  timeout: 5m
