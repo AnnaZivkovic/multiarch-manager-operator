@@ -87,7 +87,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	metrics.ProcessedPodsCtrl.Inc()
 	defer utils.HistogramObserve(now, metrics.TimeToProcessGatedPod)
 	r.processPod(ctx, pod)
-	err := r.Client.Update(ctx, &pod.Pod)
+	err := r.Update(ctx, &pod.Pod)
 	if err != nil {
 		log.Error(err, "Unable to update the pod")
 		pod.publishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, SchedulingGateRemovalFailureMsg)

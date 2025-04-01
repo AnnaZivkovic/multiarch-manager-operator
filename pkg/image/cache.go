@@ -41,7 +41,7 @@ func (c *cacheProxy) GetCompatibleArchitecturesSet(ctx context.Context, imageRef
 	metrics.InitCommonMetrics()
 	metrics.InspectionGauge.Set(float64(c.imageRefsCache.Len()))
 	now := time.Now()
-	authJSON, err := marshaledImagePullSecrets(imageReference, secrets)
+	authJSON, err := marshaledImagePullSecrets(secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +68,6 @@ func (c *cacheProxy) GetCompatibleArchitecturesSet(ctx context.Context, imageRef
 
 func (c *cacheProxy) GetRegistryInspector() IRegistryInspector {
 	return c.registryInspector
-}
-
-// clearCache purges the image metadata cache
-func (c *cacheProxy) clearCache() {
-	c.imageRefsCache.Purge()
 }
 
 func newCacheProxy() *cacheProxy {

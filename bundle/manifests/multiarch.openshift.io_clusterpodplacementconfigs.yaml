@@ -317,8 +317,8 @@ spec:
                         description: Platforms is a required field and must contain
                           at least one entry.
                         items:
-                          description: PlatformConfig holds configuration for specific
-                            platforms, with required fields validated.
+                          description: NodeAffinityScoringPlatformTerm holds configuration
+                            for specific platforms, with required fields validated.
                           properties:
                             architecture:
                               description: Architecture must be a list of non-empty
