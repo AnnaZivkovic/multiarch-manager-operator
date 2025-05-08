@@ -11,8 +11,6 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/google/uuid"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -37,8 +35,8 @@ import (
 	ocpmachineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	ocpoperatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 
-	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 )
 
 func DecorateWithWaitGroup(wg *sync.WaitGroup, f func()) {
@@ -197,9 +195,4 @@ func GetImageRepository(image string) string {
 		image = image[:colonIndex]
 	}
 	return image
-}
-
-func GenerateName() string {
-	// Generate a random name using UUID
-	return NormalizeNameString("t-" + uuid.NewString())
 }
