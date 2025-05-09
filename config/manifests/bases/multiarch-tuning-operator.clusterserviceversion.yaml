@@ -23,6 +23,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
+    operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
   labels:
