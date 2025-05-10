@@ -17,6 +17,7 @@ limitations under the License.
 package enoexecevent
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -36,10 +37,12 @@ import (
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
-
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+	ctx       context.Context
+)
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
