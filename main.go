@@ -177,6 +177,10 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
 		os.Exit(1)
 	}
+	if err = (&multiarchv1beta1.ENoExecEvent{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "ENoExecEvent")
+		os.Exit(1)
+	}
 	//+kubebuilder:scaffold:builder
 	must(mgr.AddHealthzCheck("healthz", healthz.Ping), "unable to set up health check")
 	must(mgr.AddReadyzCheck("readyz", healthz.Ping), "unable to set up ready check")
