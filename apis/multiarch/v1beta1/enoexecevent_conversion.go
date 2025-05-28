@@ -16,20 +16,7 @@ limitations under the License.
 
 package v1beta1
 
-import (
-	ctrl "sigs.k8s.io/controller-runtime"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-)
+// +kubebuilder:docs-gen:collapse=Imports
 
-// log is for logging in this package.
-var enoexeceventlog = logf.Log.WithName("enoexecevent-resource")
-
-func (r *ENoExecEvent) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(r).
-		Complete()
-}
-
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// add validating or defaulting logic for the webhook
-// https://book.kubebuilder.io/multiversion-tutorial/webhooks
+// Hub marks this type as a conversion hub.
+func (*ENoExecEvent) Hub() {}
