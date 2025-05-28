@@ -17,7 +17,11 @@ patches:
     name: clusterpodplacementconfigs.multiarch.openshift.io
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
-#- patches/webhook_in_enoexecevents.yaml
+- path: patches/webhook_in_multiarch_enoexecevents.yaml
+  target:
+    kind: CustomResourceDefinition
+    name: enoexecevents.multiarch.openshift.io
+
 #+kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
