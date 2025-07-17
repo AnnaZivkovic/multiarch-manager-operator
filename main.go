@@ -171,6 +171,10 @@ func main() {
 	})
 	must(err, "unable to create manager")
 
+	if err = (&multiarchv1beta1.PodPlacementConfig{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "PodPlacementConfig")
+		os.Exit(1)
+	}
 	//+kubebuilder:scaffold:builder
 	must(mgr.AddHealthzCheck("healthz", healthz.Ping), "unable to set up health check")
 	must(mgr.AddReadyzCheck("readyz", healthz.Ping), "unable to set up ready check")

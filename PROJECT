@@ -57,4 +57,8 @@ resources:
   kind: PodPlacementConfig
   path: github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1
   version: v1beta1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 version: "3"
