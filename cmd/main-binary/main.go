@@ -67,6 +67,7 @@ import (
 	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/controllers/enoexecevent/handler"
 	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
+	"github.com/openshift/multiarch-tuning-operator/controllers/podplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -90,6 +91,7 @@ var (
 	enableLeaderElection,
 	enableClusterPodPlacementConfigOperandWebHook,
 	enableClusterPodPlacementConfigOperandControllers,
+	enablePodPlacementConfigControllers,
 	enableENoExecEventControllers bool
 	enableCPPCInformer bool
 	enableOperator     bool
@@ -185,6 +187,9 @@ func main() {
 	if enableClusterPodPlacementConfigOperandControllers {
 		RunClusterPodPlacementConfigOperandControllers(mgr)
 	}
+	if enablePodPlacementConfigControllers {
+		RunPodPlacementConfigController(mgr)
+	}
 	if enableClusterPodPlacementConfigOperandWebHook {
 		RunClusterPodPlacementConfigOperandWebHook(mgr)
 	}
@@ -276,13 +281,23 @@ func RunENoExecEventControllers(mgr ctrl.Manager) {
 	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
 }
 
+func RunPodPlacementConfigController(mgr ctrl.Manager) {
+	if err := (&podplacementconfig.PodPlacementConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PodPlacementConfig")
+		os.Exit(1)
+	}
+}
+
 func validateFlags() error {
 	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook {
-		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-cppc-controllers, --enable-cppc-webhook")
 	}
 	// no more than one of the flags can be set
 	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook) > 1 {
-		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+		return errors.New("only one of the following flags can be set: --enable-operator, --enable-cppc-controllers, --enable-cppc-webhook")
 	}
 	return nil
 }
@@ -298,10 +313,11 @@ func bindFlags() {
 	flag.StringVar(&globalPullSecretNamespace, "global-pull-secret-namespace", "openshift-config", "The namespace where the global pull secret is stored")
 	flag.StringVar(&globalPullSecretName, "global-pull-secret-name", "pull-secret", "The name of the global pull secret")
 	flag.StringVar(&registryCertificatesConfigMapName, "registry-certificates-configmap-name", "image-registry-certificates", "The name of the configmap that contains the registry certificates")
-	flag.BoolVar(&enableClusterPodPlacementConfigOperandWebHook, "enable-ppc-webhook", false, "Enable the pod placement config operand webhook")
-	flag.BoolVar(&enableClusterPodPlacementConfigOperandControllers, "enable-ppc-controllers", false, "Enable the pod placement config operand controllers")
+	flag.BoolVar(&enableClusterPodPlacementConfigOperandWebHook, "enable-cppc-webhook", false, "Enable the pod placement config operand webhook")
+	flag.BoolVar(&enableClusterPodPlacementConfigOperandControllers, "enable-cppc-controllers", false, "Enable the pod placement config operand controllers")
 	flag.BoolVar(&enableOperator, "enable-operator", false, "Enable the operator")
 	flag.BoolVar(&enableCPPCInformer, "enable-cppc-informer", false, "Enable informer for ClusterPodPlacementConfig")
+	flag.BoolVar(&enablePodPlacementConfigControllers, "enable-ppc-controllers", false, "Enable the ENoExecEvent controllers")
 	flag.BoolVar(&enableENoExecEventControllers, "enable-enoexec-event-controllers", false, "Enable the ENoExecEvent controllers")
 	// This may be deprecated in the future. It is used to support the current way of setting the log level for operands
 	// If operands will start to support a controller that watches the ClusterPodPlacementConfig, this flag may be removed

@@ -57,7 +57,7 @@ func buildMutatingWebhookConfiguration(clusterPodPlacementConfig *v1beta1.Cluste
 // buildWebhookDeployment creates the specific deployment for the pod-placement-webhook.
 func buildWebhookDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfig) *appsv1.Deployment {
 	d := buildDeployment(clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt(), utils.PodPlacementWebhookName, 3, utils.PodPlacementWebhookName, "",
-		"--enable-ppc-webhook", "--enable-cppc-informer",
+		"--enable-cppc-webhook", "--enable-cppc-informer",
 	)
 	additionalVolumes := []corev1.Volume{
 		{
@@ -88,7 +88,7 @@ func buildWebhookDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlaceme
 // buildControllerDeployment creates the Deployment for the cluster pod placement config controller.
 func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfig, requiredSCCHostmoundAnyUID string, seLinuxOptionsType *corev1.SELinuxOptions) *appsv1.Deployment {
 	d := buildDeployment(clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt(), utils.PodPlacementControllerName, 2, utils.PodPlacementControllerName,
-		utils.PodPlacementFinalizerName, "--leader-elect", "--enable-ppc-controllers", "--enable-cppc-informer",
+		utils.PodPlacementFinalizerName, "--leader-elect", "--enable-cppc-controllers", "--enable-cppc-informer",
 	)
 	if d.Spec.Template.Annotations == nil {
 		d.Spec.Template.Annotations = map[string]string{}
