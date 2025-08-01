@@ -51,7 +51,7 @@ type Pod struct {
 	models.Pod
 }
 
-func newPod(pod *corev1.Pod, ctx context.Context, recorder record.EventRecorder) *Pod {
+func NewPod(pod *corev1.Pod, ctx context.Context, recorder record.EventRecorder) *Pod {
 	return &Pod{
 		Pod: *models.NewPod(pod, ctx, recorder),
 	}
@@ -76,8 +76,8 @@ func (pod *Pod) ensureSchedulingGate() {
 	pod.AddGate(utils.SchedulingGateName)
 }
 
-// getPodImagePullSecrets returns the names of the image pull secrets used by the pod.
-func (pod *Pod) getPodImagePullSecrets() []string {
+// GetPodImagePullSecrets returns the names of the image pull secrets used by the pod.
+func (pod *Pod) GetPodImagePullSecrets() []string {
 	if pod.Spec.ImagePullSecrets == nil {
 		// If the imagePullSecrets array is nil, return emptylist
 		return []string{}
@@ -373,7 +373,7 @@ func (pod *Pod) publishIgnorePod() {
 	pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePredicatesConflict, ArchitecturePredicatesConflictMsg)
 }
 
-func (pod *Pod) handleError(err error, s string) {
+func (pod *Pod) HandleError(err error, s string) {
 	if err == nil {
 		return
 	}

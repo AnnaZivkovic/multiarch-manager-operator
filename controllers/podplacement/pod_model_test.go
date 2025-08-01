@@ -54,9 +54,9 @@ func TestPod_GetPodImagePullSecrets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
-			g.Expect(pod.getPodImagePullSecrets()).To(Equal(tt.want))
+			g.Expect(pod.GetPodImagePullSecrets()).To(Equal(tt.want))
 		})
 	}
 }
@@ -96,7 +96,7 @@ func TestPod_HasSchedulingGate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
 			g.Expect(pod.HasSchedulingGate()).To(Equal(tt.want))
 		})
@@ -150,7 +150,7 @@ func TestPod_RemoveSchedulingGate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			pod.RemoveSchedulingGate()
 			g := NewGomegaWithT(t)
 			g.Expect(pod.Spec.SchedulingGates).To(Equal(tt.want))
@@ -215,7 +215,7 @@ func TestPod_imagesNamesSet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
 			g.Expect(pod.imagesNamesSet()).To(Equal(tt.want))
 		})
@@ -268,7 +268,7 @@ func TestPod_intersectImagesArchitecture(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			gotSupportedArchitectures, err := pod.intersectImagesArchitecture(tt.pullSecretDataList)
 			g := NewGomegaWithT(t)
 			g.Expect(err).Should(WithTransform(func(err error) bool { return err != nil }, Equal(tt.wantErr)),
@@ -345,7 +345,7 @@ func TestPod_getArchitecturePredicate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			got, err := pod.getArchitecturePredicate(tt.pullSecretDataList)
 			g := NewGomegaWithT(t)
 			g.Expect(err).Should(WithTransform(func(err error) bool { return err != nil }, Equal(tt.wantErr)),
@@ -496,7 +496,7 @@ func TestPod_setArchNodeAffinity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
 			pred, err := pod.getArchitecturePredicate(nil)
 			g.Expect(err).ShouldNot(HaveOccurred())
@@ -543,7 +543,7 @@ func TestPod_SetPreferredArchNodeAffinityWithCPPC(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
 			pod.SetPreferredArchNodeAffinity(
 				NewClusterPodPlacementConfig().
@@ -571,7 +571,7 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
 			pod.SetPreferredArchNodeAffinity(&v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -777,7 +777,7 @@ func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
-			pod := newPod(tt.pod, ctx, nil)
+			pod := NewPod(tt.pod, ctx, nil)
 			_, err := pod.SetNodeAffinityArchRequirement(tt.pullSecretDataList)
 			g := NewGomegaWithT(t)
 			if tt.expectErr {
@@ -839,7 +839,7 @@ func TestEnsureArchitectureLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(NewPod().Build(), ctx, nil)
+			pod := NewPod(NewPod().Build(), ctx, nil)
 
 			pod.ensureArchitectureLabels(tt.requirement)
 
@@ -904,7 +904,7 @@ func TestPod_EnsureSchedulingGate(t *testing.T) {
 				schedulingGates = append(schedulingGates, gate.Name)
 			}
 
-			pod := newPod(NewPod().WithSchedulingGates(schedulingGates...).Build(), ctx, nil)
+			pod := NewPod(NewPod().WithSchedulingGates(schedulingGates...).Build(), ctx, nil)
 
 			pod.ensureSchedulingGate()
 			if !reflect.DeepEqual(pod.Spec.SchedulingGates, test.expectedGates) {
@@ -1007,7 +1007,7 @@ func TestPod_shouldIgnorePod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
+			pod := NewPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
 			if got := pod.shouldIgnorePod(&v1beta1.ClusterPodPlacementConfig{}); got != tt.want {
 				t.Errorf("shouldIgnorePod() = %v, want %v", got, tt.want)
 			}
@@ -1062,7 +1062,7 @@ func TestPod_shouldIgnorePodWithPluginsEnabledInCPPC(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
+			pod := NewPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
 			if got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
 				WithName(common.SingletonResourceObjectName).
 				WithNodeAffinityScoring(true).
@@ -1103,7 +1103,7 @@ func TestPod_shouldIgnorePodWithPluginsDisabledInCPPC(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
+			pod := NewPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
 			if got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
 				WithName(common.SingletonResourceObjectName).
 				WithNodeAffinityScoring(false).
@@ -1183,7 +1183,7 @@ func TestIsPreferredAffinityConfiguredForArchitecture(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			pod := newPod(NewPod().WithAffinity(test.affinity).Build(), ctx, nil)
+			pod := NewPod(NewPod().WithAffinity(test.affinity).Build(), ctx, nil)
 			result := pod.isPreferredAffinityConfiguredForArchitecture()
 			if result != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, result)
@@ -1290,7 +1290,7 @@ func TestIsNodeSelectorConfiguredForArchitecture(t *testing.T) {
 			for k, v := range test.nodeSelector {
 				nodeSelectors = append(nodeSelectors, k, v)
 			}
-			pod := newPod(NewPod().WithNodeSelectors(nodeSelectors...).WithAffinity(test.affinity).Build(), ctx, nil)
+			pod := NewPod(NewPod().WithNodeSelectors(nodeSelectors...).WithAffinity(test.affinity).Build(), ctx, nil)
 
 			result := pod.isNodeSelectorConfiguredForArchitecture()
 			if result != test.expected {

@@ -282,7 +282,7 @@ func RunENoExecEventControllers(mgr ctrl.Manager) {
 }
 
 func RunPodPlacementConfigController(mgr ctrl.Manager) {
-	if err := (&podplacementconfig.PodPlacementConfigReconciler{
+	if err := (&podplacementconfig.Reconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {

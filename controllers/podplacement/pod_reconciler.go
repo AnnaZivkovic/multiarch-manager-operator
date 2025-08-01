@@ -70,7 +70,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	defer utils.HistogramObserve(now, metrics.TimeToProcessPod)
 	log := ctrllog.FromContext(ctx)
 
-	pod := newPod(&corev1.Pod{}, ctx, r.Recorder)
+	pod := NewPod(&corev1.Pod{}, ctx, r.Recorder)
 
 	if err := r.Get(ctx, req.NamespacedName, pod.PodObject()); err != nil {
 		log.V(2).Info("Unable to fetch pod", "error", err)
@@ -122,11 +122,11 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 
 	// Prepare the requirement for the node affinity.
 	psdl, err := r.pullSecretDataList(ctx, pod)
-	pod.handleError(err, "Unable to retrieve the image pull secret data for the pod.")
+	pod.HandleError(err, "Unable to retrieve the image pull secret data for the pod.")
 	// If no error occurred when retrieving the image pull secret data, set the node affinity.
 	if err == nil {
 		_, err = pod.SetNodeAffinityArchRequirement(psdl)
-		pod.handleError(err, "Unable to set the node affinity for the pod.")
+		pod.HandleError(err, "Unable to set the node affinity for the pod.")
 	}
 	if pod.maxRetries() && err != nil {
 		// the number of retries is incremented in the handleError function when the error is not nil.
@@ -153,7 +153,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 func (r *PodReconciler) pullSecretDataList(ctx context.Context, pod *Pod) ([][]byte, error) {
 	log := ctrllog.FromContext(ctx)
 	secretAuths := make([][]byte, 0)
-	secretList := pod.getPodImagePullSecrets()
+	secretList := pod.GetPodImagePullSecrets()
 	for _, pullsecret := range secretList {
 		secret, err := r.ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, pullsecret, metav1.GetOptions{})
 		if err != nil {

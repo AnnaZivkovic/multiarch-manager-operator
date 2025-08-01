@@ -71,7 +71,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	a.once.Do(func() {
 		a.decoder = admission.NewDecoder(a.scheme)
 	})
-	pod := newPod(&corev1.Pod{}, ctx, a.recorder)
+	pod := NewPod(&corev1.Pod{}, ctx, a.recorder)
 
 	err := a.decoder.Decode(req, &pod.Pod)
 	if err != nil {
