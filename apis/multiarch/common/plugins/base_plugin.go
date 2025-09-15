@@ -20,13 +20,7 @@ import "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 
 // +k8s:deepcopy-gen=package
 
-// LocalPlugins represents the plugins configuration for podplacementconfigs resource.
-// +kubebuilder:object:generate=true
-type LocalPlugins struct {
-	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
-}
-
-// Plugins represents the plugins configuration for cluster pod placement config.
+// Plugins represents the plugins configuration.
 // +kubebuilder:object:generate=true
 type Plugins struct {
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
