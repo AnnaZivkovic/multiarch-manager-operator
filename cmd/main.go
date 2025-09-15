@@ -60,14 +60,13 @@ import (
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
-	multiarchv1alpha1 "github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
-	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	multiarchv1alpha1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 
-	"github.com/openshift/multiarch-tuning-operator/api/common"
-	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/internal/controller/enoexecevent/handler"
-	"github.com/openshift/multiarch-tuning-operator/internal/controller/operator"
-	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
-	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacementconfig"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/controllers/enoexecevent/handler"
+	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
+	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -188,7 +187,6 @@ func main() {
 
 	if enableOperator {
 		RunOperator(mgr)
-		RunPodPlacementConfigWebHook(mgr)
 	}
 	if enableClusterPodPlacementConfigOperandControllers {
 		RunClusterPodPlacementConfigOperandControllers(mgr)
@@ -273,11 +271,6 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 }
 
-func RunPodPlacementConfigWebHook(mgr ctrl.Manager) {
-	mgr.GetWebhookServer().Register("/validate-multiarch-openshift-io-v1beta1-podplacementconfig",
-		&webhook.Admission{Handler: podplacementconfig.NewPodPlacementConfigWebhook(mgr.GetAPIReader(), mgr.GetScheme())})
-}
-
 func RunENoExecEventControllers(mgr ctrl.Manager) {
 	config := ctrl.GetConfigOrDie()
 	clientset := kubernetes.NewForConfigOrDie(config)
@@ -323,7 +316,7 @@ func bindFlags() {
 	klog.InitFlags(nil)
 	flag.Parse()
 	// Set the Log Level as AtomicLevel to allow runtime changes
-	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel))) // #nosec G115 -- initialLogLevel is constrained to 0-3 range
+	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(-initialLogLevel))
 	zapLogger := zap.New(zap.Level(utils.AtomicLevel), zap.UseDevMode(false))
 	klog.SetLogger(zapLogger)
 	ctrllog.SetLogger(zapLogger)

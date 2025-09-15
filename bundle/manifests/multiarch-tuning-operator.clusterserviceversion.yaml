@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2026-01-16T03:19:24Z"
+    createdAt: "2025-09-15T17:52:09Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -44,9 +44,9 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
-    operators.operatorframework.io/builder: operator-sdk-v1.33.0
+    operators.operatorframework.io/builder: operator-sdk-v1.31.0
     operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
-    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
   labels:
@@ -54,7 +54,7 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/arch.ppc64le: supported
     operatorframework.io/arch.s390x: supported
-  name: multiarch-tuning-operator.v1.2.2
+  name: multiarch-tuning-operator.v1.2.0
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
@@ -244,7 +244,6 @@ spec:
           resources:
           - clusterpodplacementconfigs
           - enoexecevents
-          - podplacementconfigs
           verbs:
           - create
           - delete
@@ -258,7 +257,6 @@ spec:
           resources:
           - clusterpodplacementconfigs/finalizers
           - enoexecevents/finalizers
-          - podplacementconfigs/finalizers
           verbs:
           - update
         - apiGroups:
@@ -266,7 +264,6 @@ spec:
           resources:
           - clusterpodplacementconfigs/status
           - enoexecevents/status
-          - podplacementconfigs/status
           verbs:
           - get
           - patch
@@ -490,7 +487,7 @@ spec:
   provider:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
-  version: 1.2.2
+  version: 1.2.0
   webhookdefinitions:
   - admissionReviewVersions:
     - v1
@@ -517,31 +514,9 @@ spec:
       operations:
       - CREATE
       - UPDATE
-      - DELETE
       resources:
       - clusterpodplacementconfigs
     sideEffects: None
     targetPort: 9443
     type: ValidatingAdmissionWebhook
     webhookPath: /validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig
-  - admissionReviewVersions:
-    - v1
-    containerPort: 443
-    deploymentName: multiarch-tuning-operator-controller-manager
-    failurePolicy: Fail
-    generateName: validate-podplacementconfig.multiarch.openshift.io
-    rules:
-    - apiGroups:
-      - multiarch.openshift.io
-      apiVersions:
-      - v1beta1
-      operations:
-      - CREATE
-      - UPDATE
-      - DELETE
-      resources:
-      - podplacementconfigs
-    sideEffects: None
-    targetPort: 9443
-    type: ValidatingAdmissionWebhook
-    webhookPath: /validate-multiarch-openshift-io-v1beta1-podplacementconfig

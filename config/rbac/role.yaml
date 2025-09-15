@@ -139,7 +139,6 @@ rules:
   resources:
   - clusterpodplacementconfigs
   - enoexecevents
-  - podplacementconfigs
   verbs:
   - create
   - delete
@@ -153,7 +152,6 @@ rules:
   resources:
   - clusterpodplacementconfigs/finalizers
   - enoexecevents/finalizers
-  - podplacementconfigs/finalizers
   verbs:
   - update
 - apiGroups:
@@ -161,7 +159,6 @@ rules:
   resources:
   - clusterpodplacementconfigs/status
   - enoexecevents/status
-  - podplacementconfigs/status
   verbs:
   - get
   - patch
