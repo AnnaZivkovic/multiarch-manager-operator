@@ -16,7 +16,6 @@ import (
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
-	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 func GetPodsWithLabel(ctx context.Context, client runtimeclient.Client, namespace, labelKey, labelInValue string) (*v1.PodList, error) {
@@ -66,20 +65,25 @@ func StorePodsLog(ctx context.Context, clientset *kubernetes.Clientset, client r
 	if err != nil {
 		return err
 	}
+
+	var errs []error
 	for _, pod := range pods.Items {
 		log.Printf("Getting logs for pod %s", pod.Name)
-		logs, err := GetPodLog(ctx, clientset, utils.Namespace(), pod.Name, containerName)
+		logs, err := GetPodLog(ctx, clientset, namespace, pod.Name, containerName)
 		if err != nil {
 			log.Printf("Failed to get logs for pod %s: %v", pod.Name, err)
+			errs = append(errs, fmt.Errorf("get logs for pod %s: %w", pod.Name, err))
 			continue
 		}
 		err = WriteToFile(dir, fmt.Sprintf("%s.log", pod.Name), logs)
 		if err != nil {
-			log.Printf("Failed to write logs to file: %v", err)
-			return err
-		} else {
-			return nil
+			log.Printf("Failed to write logs to file for pod %s: %v", pod.Name, err)
+			errs = append(errs, fmt.Errorf("write logs for pod %s: %w", pod.Name, err))
 		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors occurred while storing pod logs: %v", errs)
 	}
 	return nil
 }
@@ -243,6 +247,38 @@ func VerifyPodAnnotations(ctx context.Context, client runtimeclient.Client, ns *
 				return p.Annotations
 			}, And(Not(BeEmpty()), HaveKeyWithValue(k, v)))))
 		}
+	}
+}
+
+func VerifyPodsEvents(ctx context.Context, client runtimeclient.Client, ns *v1.Namespace, labelKey, labelInValue, eventReason string) func(g Gomega) {
+	return func(g Gomega) {
+		// Build label selector
+		r, err := labels.NewRequirement(labelKey, selection.In, []string{labelInValue})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		pods := &v1.PodList{}
+		err = client.List(ctx, pods, &runtimeclient.ListOptions{
+			Namespace:     ns.Name,
+			LabelSelector: labels.NewSelector().Add(*r),
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// List all events in the namespace
+		events := &v1.EventList{}
+		err = client.List(ctx, events, &runtimeclient.ListOptions{Namespace: ns.Name})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Verify each pod has at least one matching event
+		g.Expect(pods.Items).Should(HaveEach(
+			WithTransform(func(p v1.Pod) bool {
+				for _, e := range events.Items {
+					if e.InvolvedObject.UID == p.UID && e.Reason == eventReason {
+						return true
+					}
+				}
+				return false
+			}, BeTrue()),
+		))
 	}
 }
 
