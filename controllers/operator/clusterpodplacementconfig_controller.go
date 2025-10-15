@@ -179,10 +179,20 @@ func (r *ClusterPodPlacementConfigReconciler) getCorrectHostmountAnyUIDSCC(ctx c
 	// - OpenShift 4.19 maps to Kubernetes 1.32.x and so on
 	// - Assume this mapping will remain stable after GA (Generally Available) release
 	// We use this check to decide which SCC (SecurityContextConstraint) to use
-	if minor < 32 {
-		// logic for Kubernetes < 1.32 (OpenShift < 4.19)
+	if minor < 30 {
+		// logic for Kubernetes < 1.30 (OpenShift < 4.17)
 		return "hostmount-anyuid", nil, nil
 	}
+
+	// Because this MCO PR https://github.com/openshift/machine-config-operator/pull/4933
+	// was backported to OCP 4.17 and 4.18, it is causing a regression for MTO in those versions.
+	// Adding a temporary workaround here to give the pod temporary privileged SCC access.
+	if minor == 30 || minor == 31 {
+		return "privileged", &corev1.SELinuxOptions{
+			Type: "spc_t",
+		}, nil
+	}
+
 	// logic for default set for Kubernetes >= 1.32 (OpenShift >= 4.19)
 	return "hostmount-anyuid-v2", &corev1.SELinuxOptions{
 		Type: "spc_t",
