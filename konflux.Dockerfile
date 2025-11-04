@@ -33,9 +33,10 @@ COPY LICENSE /licenses/license.txt
 USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
-LABEL name="multiarch-tuning-operator"
+LABEL name="multiarch-tuning/multiarch-tuning-rhel9-operator"
 LABEL release="1.1.1"
 LABEL version="1.1.1"
+LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."
 LABEL description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \
