@@ -1,5 +1,5 @@
 FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23 as builder
-ARG IMG=registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator@sha256:d532619b2090be5cc69a70225ca3dcbbc701af35a533be277783beb8ffdcdc91
+ARG IMG=registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator@sha256:e1c4dd8deb2b7c11f2ff6680496969b58922155900286effea415a2a7affe2bd
 ARG ORIGINAL_IMG=registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
 WORKDIR /code
 COPY ./ ./
@@ -17,8 +17,8 @@ LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1
 LABEL operators.operatorframework.io.bundle.manifests.v1=manifests/
 LABEL operators.operatorframework.io.bundle.metadata.v1=metadata/
 LABEL operators.operatorframework.io.bundle.package.v1=multiarch-tuning-operator
-LABEL operators.operatorframework.io.bundle.channels.v1=tech-preview
-LABEL operators.operatorframework.io.bundle.channel.default.v1=tech-preview
+LABEL operators.operatorframework.io.bundle.channels.v1=stable
+LABEL operators.operatorframework.io.bundle.channel.default.v1=stable
 LABEL operators.operatorframework.io.metrics.builder=operator-sdk-v1.31.0
 LABEL operators.operatorframework.io.metrics.mediatype.v1=metrics+v1
 LABEL operators.operatorframework.io.metrics.project_layout=go.kubebuilder.io/v3
@@ -35,9 +35,10 @@ COPY --from=builder /code/bundle/tests/scorecard /tests/scorecard/
 # Labels from hack/patch-bundle-dockerfile.sh
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
-LABEL name="multiarch-tuning-operator-bundle"
-LABEL release="1.1.1"
-LABEL version="1.1.1"
+LABEL name="multiarch-tuning/multiarch-tuning-operator-bundle"
+LABEL release="1.2.0"
+LABEL version="1.2.0"
+LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."
 LABEL description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \
