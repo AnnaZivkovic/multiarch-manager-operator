@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,10 +30,12 @@ import (
 	"github.com/containers/image/v5/docker"
 	"github.com/containers/image/v5/image"
 	"github.com/containers/image/v5/manifest"
+	"github.com/containers/image/v5/pkg/shortnames"
 	"github.com/containers/image/v5/pkg/sysregistriesv2"
 	"github.com/containers/image/v5/signature"
 	"github.com/containers/image/v5/types"
 	"github.com/opencontainers/go-digest"
+	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"golang.org/x/sys/unix"
 
@@ -40,7 +43,20 @@ import (
 )
 
 const (
-	operatorSDKBuilderBundleAnnotation = "operators.operatorframework.io.metrics.builder"
+	osdkMetricsAnnotation              = "operators.operatorframework.io.metrics.builder"
+	osdkMediaTypeAnnotation            = "operators.operatorframework.io.bundle.mediatype.v1"
+	osdkManifestsAnnotation            = "operators.operatorframework.io.bundle.manifests.v1"
+	osdkBundleMetadataAnnotation       = "operators.operatorframework.io.bundle.metadata.v1"
+	osdkBundlePackageAnnotation        = "operators.operatorframework.io.bundle.package.v1"
+	osdkBundleChannelsAnnotation       = "operators.operatorframework.io.bundle.channels.v1"
+	osdkBundleDefaultChannelAnnotation = "operators.operatorframework.io.bundle.channel.default.v1"
+)
+
+var (
+	// https://github.com/operator-framework/operator-registry/blob/c4b5f1196/docs/design/operator-bundle.md
+	operatorSDKBuilderBundleAnnotationSet = sets.New[string](
+		osdkMetricsAnnotation, osdkMediaTypeAnnotation, osdkManifestsAnnotation, osdkBundleMetadataAnnotation,
+		osdkBundlePackageAnnotation, osdkBundleChannelsAnnotation, osdkBundleDefaultChannelAnnotation)
 )
 
 type registryInspector struct {
@@ -77,20 +93,24 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	// than do this everytime
 	sysregistriesv2.InvalidateCache()
 
-	// Check if the image is a manifest list
-	ref, err := docker.ParseReference(imageReference)
+	// check if image reference has both tag and digest
+	imageReference, err = parseImageReference(imageReference)
 	if err != nil {
-		log.Error(err, "Error parsing the image reference for the image")
+		log.Error(err, "Couldn't parse image reference")
 		return nil, err
 	}
+
 	sys := &types.SystemContext{
 		AuthFilePath:                authFile.Name(),
+		RegistriesDirPath:           RegistryCertsDir(),
 		SystemRegistriesConfPath:    RegistriesConfPath(),
-		SystemRegistriesConfDirPath: RegistryCertsDir(),
+		SystemRegistriesConfDirPath: RegistriesConfDir(),
 		SignaturePolicyPath:         PolicyConfPath(),
 		DockerPerHostCertDirPath:    DockerCertsDir(),
 	}
-	src, err := ref.NewImageSource(ctx, sys)
+
+	// Check if the image is a manifest list
+	src, err := resolveAndOpenImageSource(ctx, sys, imageReference)
 	if err != nil {
 		log.Error(err, "Error creating the image source")
 		return nil, err
@@ -165,7 +185,7 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		log.Error(err, "Error parsing the OCI config of the image")
 		return nil, err
 	}
-	if _, ok := config.Config.Labels[operatorSDKBuilderBundleAnnotation]; ok {
+	if isBundleImage(config.Config) {
 		log.V(3).Info("The image is an operator bundle image")
 		// Operator bundle images are not tied to a specific architecture, so we should not set any constraints
 		// based on the architecture they report.
@@ -180,6 +200,49 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		return sets.New[string](config.Architecture), nil
 	}
 	return supportedArchitectures, nil
+}
+
+// parseImageReference normalizes an imageName into a reference suitable for use
+// with the inspection library. It returns one of the following:
+//  1. A tag-only reference if no digest is present
+//  2. A digest-only reference if a digest is present, dropping the tag when both
+//     a tag and digest are specified in the pod's container image field
+func parseImageReference(imageName string) (string, error) {
+	parts := strings.Split(imageName, "@sha256:")
+	switch len(parts) {
+	case 0:
+		return "", errors.New("invalid image name, must not be empty")
+	case 1:
+		// No digest present, return as-is
+		return imageName, nil
+	case 2:
+		// Since the length is 2, imageName has a digest.
+		// We need to check if there's also a tag to remove.
+		// Format: [registry[:port]/][namespace/]image[:tag]@sha256:digest
+		namePart := parts[0]
+		digest := parts[1]
+		/// Find last "/" to separate registry/namespace from image name
+		lastSlash := strings.LastIndex(namePart, "/")
+		lastColon := strings.LastIndex(namePart, ":")
+		if lastColon > lastSlash {
+			// Last ":" is a tag, remove it
+			namePart = namePart[:lastColon]
+		}
+		return namePart + "@sha256:" + digest, nil
+	default:
+		return "", errors.New("invalid image name, must only have one digest")
+	}
+}
+
+func isBundleImage(image ociv1.ImageConfig) bool {
+	// Check if the image is an operator bundle image by looking for the operator-sdk annotation
+	for label := range image.Labels {
+		if operatorSDKBuilderBundleAnnotationSet.Has(label) {
+			// The image is an operator bundle image
+			return true
+		}
+	}
+	return false
 }
 
 func (i *registryInspector) createAuthFile(imageReference string, secrets ...[]byte) (*os.File, error) {
@@ -216,6 +279,49 @@ func marshaledImagePullSecrets(imageReference string, secrets [][]byte) ([]byte,
 		return nil, err
 	}
 	return authJSON, nil
+}
+
+func resolveAndOpenImageSource(ctx context.Context, sys *types.SystemContext, imageReference string) (types.ImageSource, error) {
+	log := ctrllog.FromContext(ctx).WithValues("imageReference", imageReference)
+
+	// Ensure the image is a fully-qualified reference.
+	// If it's a short name, shortnames.Resolve will expand it into one or more fully-qualified names.
+	// Since imageReference may start with "//", which shortnames.Resolve cannot handle,
+	// strip the leading "//" if present.
+	resolved, err := shortnames.Resolve(sys, strings.TrimPrefix(imageReference, "//"))
+	if err != nil {
+		log.Error(err, "Failed to resolve image shortname")
+		return nil, err
+	}
+
+	if desc := resolved.Description(); desc != "" {
+		log.V(2).Info("Shortname resolution details", "description", desc)
+	}
+
+	var pullErrs []error
+	for i, cand := range resolved.PullCandidates {
+		fqName := fmt.Sprintf("//%s", cand.Value.String())
+		log.V(1).Info("Trying candidate", "index", i, "fullName", fqName)
+
+		ref, err := docker.ParseReference(fqName)
+		if err != nil {
+			log.Error(err, "Failed to parse image reference")
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+
+		src, err := ref.NewImageSource(ctx, sys)
+		if err != nil {
+			log.Error(err, "Failed to create image source")
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+		return src, nil
+	}
+
+	err = resolved.FormatPullErrors(pullErrs)
+	log.Error(err, "All image pull candidates failed")
+	return nil, err
 }
 
 // writeMemFile creates an in memory file based on memfd_create
