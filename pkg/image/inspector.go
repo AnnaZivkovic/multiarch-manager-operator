@@ -208,29 +208,51 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 //  2. A digest-only reference if a digest is present, dropping the tag when both
 //     a tag and digest are specified in the pod's container image field
 func parseImageReference(imageName string) (string, error) {
-	parts := strings.Split(imageName, "@sha256:")
-	switch len(parts) {
-	case 0:
+	// Check for empty image name first
+	if imageName == "" {
 		return "", errors.New("invalid image name, must not be empty")
-	case 1:
-		// No digest present, return as-is
+	}
+
+	// Find digest separator (supports sha256, sha512, sha384, etc.)
+	digestIdx := strings.Index(imageName, "@sha")
+
+	// Check if digest is present
+	switch digestIdx {
+	case -1:
+		// No digest is present
 		return imageName, nil
-	case 2:
-		// Since the length is 2, imageName has a digest.
-		// We need to check if there's also a tag to remove.
-		// Format: [registry[:port]/][namespace/]image[:tag]@sha256:digest
-		namePart := parts[0]
-		digest := parts[1]
-		/// Find last "/" to separate registry/namespace from image name
-		lastSlash := strings.LastIndex(namePart, "/")
-		lastColon := strings.LastIndex(namePart, ":")
-		if lastColon > lastSlash {
-			// Last ":" is a tag, remove it
-			namePart = namePart[:lastColon]
-		}
-		return namePart + "@sha256:" + digest, nil
+	case 0:
+		// Image name can't start with digest
+		return "", errors.New("invalid image name, image must not be empty")
 	default:
+		// Now check that if there is a tag present
+	}
+
+	// Validate there's only one digest
+	if strings.Count(imageName[digestIdx+1:], "@sha") > 0 {
 		return "", errors.New("invalid image name, must only have one digest")
+	}
+
+	namePart := imageName[:digestIdx]
+	digestPart := imageName[digestIdx:] // includes the @
+
+	// Find last "/" and last ":" to determine if we have a tag to remove
+	// Format: [registry[:port]/][namespace/]image[:tag]@digest
+	lastSlash := strings.LastIndex(namePart, "/")
+	lastColon := strings.LastIndex(namePart, ":")
+
+	//determine what to do with colons
+	switch {
+	case lastColon == -1:
+		// No colon at all - no port, no tag
+		return imageName, nil
+	case lastColon > lastSlash:
+		// Colon is after last slash (or no slash) - it's a tag, remove it
+		namePart = namePart[:lastColon]
+		return namePart + digestPart, nil
+	default:
+		// Colon is before last slash - it's a port, keep it
+		return imageName, nil
 	}
 }
 
