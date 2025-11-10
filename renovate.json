@@ -1,17 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>konflux-ci/mintmaker//config/renovate/renovate.json"],
-  "packageRules": [
-    {
-      "description": "Automerge konflux update prs",
-      "matchManagers": ["tekton"],
-      "automerge": true
-    },
-    {
-      "description": "Block konflux updates to go.mod",
-      "matchManagers": ["gomod"],
-      "matchPackagePatterns": [".*"],
-      "enabled": false
-    }
-  ]
+  "gomod": {
+    "enabled": false
+  },
+  "dockerfile": {
+    "enabled": false
+  }
 }
