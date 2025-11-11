@@ -26,8 +26,8 @@ metadata:
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
-    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-09-15T17:52:09Z"
+    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
+    createdAt: "2025-11-12T04:49:47Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
