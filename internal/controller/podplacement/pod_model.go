@@ -207,6 +207,7 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, true)
 		} else {
 			skippedArchitectures = append(skippedArchitectures, nodeAffinityScoringPlatformTerm.Architecture)
+			metrics.ArchitecturesSkipped.Inc()
 			// Track that this architecture was skipped from this source
 			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, false)
 			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
@@ -293,6 +294,23 @@ func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, ap
 		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, newEntry)
 	} else {
 		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
+	}
+
+	// Track annotation size metric and warn if getting large
+	if pod.Annotations != nil {
+		if annotation, ok := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]; ok {
+			annotationSize := len(annotation)
+			metrics.AnnotationSizeBytes.Observe(float64(annotationSize))
+
+			// Optional: Log warning if annotation is getting large
+			const MaxRecommendedSize = 32768 // 32KB (K8s total limit is 256KB)
+			if annotationSize > MaxRecommendedSize {
+				log := ctrllog.FromContext(pod.Ctx())
+				log.V(2).Info("Preferred affinity annotation size is large",
+					"sizeBytes", annotationSize,
+					"maxRecommended", MaxRecommendedSize)
+			}
+		}
 	}
 }
 

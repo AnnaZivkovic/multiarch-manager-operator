@@ -23,6 +23,10 @@ The following metrics are exposed by the Pod Placement Operand:
 | `mto_ppo_ctrl_time_to_inspect_pod_images_seconds` | Histogram | pod placement controller | The time taken to inspect all the images in a pod (it may include the time to retrieve this info from a cache). |
 | `mto_ppo_ctrl_processed_pods_total`               | Counter   | pod placement controller | The total number of pods processed by the pod placement controller that had a scheduling gate                   |
 | `mto_ppo_ctrl_failed_image_inspection_total`      | Counter   | pod placement controller | The total number of image inspections that failed.                                                              |
+| `mto_ppo_ctrl_ppcs_processed_per_pod`             | Histogram | pod placement controller | The number of PodPlacementConfigs processed per pod.                                                             |
+| `mto_ppo_ctrl_architectures_skipped_total`        | Counter   | pod placement controller | The total number of architectures skipped due to conflicts when applying PPC/CPPC preferred affinity.            |
+| `mto_ppo_ctrl_ppc_listing_errors_total`           | Counter   | pod placement controller | The total number of errors when listing PodPlacementConfigs.                                                     |
+| `mto_ppo_ctrl_preferred_affinity_annotation_size_bytes` | Histogram | pod placement controller | The size of the preferred-affinity-sources annotation in bytes.                                              |
 | `mto_ppo_pods_gated`                              | Gauge     | controller and webhook   | The current number of gated pods (this metric is not considered reliable yet). It should converge to 0.         |
 | `mto_ppo_wh_pods_processed_total`                 | Counter   | mutating webhook         | The total number of pods processed by the webhook.                                                              |
 | `mto_ppo_wh_pods_gated_total`                     | Counter   | mutating webhook         | The total number of pods gated by the webhook.                                                                  |
@@ -71,6 +75,27 @@ sum(mto_ppo_wh_pods_gated_total)
 sum(mto_ppo_ctrl_processed_pods_total)
 -- Failed image inspection
 sum(mto_ppo_ctrl_failed_image_inspection_total)
+
+-- Average number of PPCs processed per pod
+rate(mto_ppo_ctrl_ppcs_processed_per_pod_sum[5m]) / rate(mto_ppo_ctrl_ppcs_processed_per_pod_count[5m])
+
+-- PPC listing error rate
+rate(mto_ppo_ctrl_ppc_listing_errors_total[5m])
+
+-- Architecture conflict rate (skipped architectures)
+rate(mto_ppo_ctrl_architectures_skipped_total[5m])
+
+-- Total PPC listing errors
+sum(mto_ppo_ctrl_ppc_listing_errors_total)
+
+-- Total architectures skipped
+sum(mto_ppo_ctrl_architectures_skipped_total)
+
+-- 95th percentile annotation size
+histogram_quantile(0.95, sum by (le) (rate(mto_ppo_ctrl_preferred_affinity_annotation_size_bytes_bucket[5m])))
+
+-- Maximum annotation size observed
+max(mto_ppo_ctrl_preferred_affinity_annotation_size_bytes)
 
 -- Current number of gated pods (with the multiarch tuning operator scheduling gate)
 sum(mto_ppo_pods_gated)

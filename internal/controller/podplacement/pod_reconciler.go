@@ -109,12 +109,14 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	// List existing PodPlacementConfigs in the same namespace
 	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
 	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		metrics.PPCListingErrors.Inc()
 		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
 		return
 	}
 
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
 	matchingPPCs := pod.filterMatchingPPCs(ppcList)
+	metrics.PPCsProcessedPerPod.Observe(float64(len(matchingPPCs)))
 
 	if pod.shouldIgnorePod(cppc, matchingPPCs) {
 		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...")
