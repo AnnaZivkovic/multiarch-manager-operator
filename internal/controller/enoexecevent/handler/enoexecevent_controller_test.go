@@ -76,6 +76,39 @@ func ensureLabel(podName string) AsyncAssertion {
 	})
 }
 
+func ensureErrorLabel(eneeName string, expectedErrorReason string) AsyncAssertion {
+	return Eventually(func(g Gomega) {
+		enee := &v1beta1.ENoExecEvent{}
+		err := k8sClient.Get(ctx, crclient.ObjectKey{
+			Name:      eneeName,
+			Namespace: utils.Namespace(),
+		}, enee)
+		g.Expect(err).NotTo(HaveOccurred(), "failed to get ENoExecEvent", err)
+		g.Expect(enee.Labels).To(HaveKeyWithValue(ENoExecEventErrorLabel, expectedErrorReason), "ENoExecEvent should be labeled with error label")
+	})
+}
+
+func removeFinalizerFromENEE(eneeName string, finalizer string) {
+	By("Removing finalizer from ENoExecEvent")
+	Eventually(func(g Gomega) {
+		enee := &v1beta1.ENoExecEvent{}
+		err := k8sClient.Get(ctx, crclient.ObjectKey{
+			Name:      eneeName,
+			Namespace: utils.Namespace(),
+		}, enee)
+		g.Expect(err).NotTo(HaveOccurred(), "failed to get ENoExecEvent", err)
+		// Remove the specified finalizer
+		newFinalizers := []string{}
+		for _, f := range enee.Finalizers {
+			if f != finalizer {
+				newFinalizers = append(newFinalizers, f)
+			}
+		}
+		enee.Finalizers = newFinalizers
+		g.Expect(k8sClient.Update(ctx, enee)).To(Succeed(), "failed to remove finalizer from ENoExecEvent")
+	}).WithPolling(e2e.PollingInterval).WithTimeout(e2e.WaitShort).Should(Succeed(), "failed to remove finalizer")
+}
+
 func deletePod(podName string) {
 	pod := &v1.Pod{}
 	err := k8sClient.Get(ctx, crclient.ObjectKey{
@@ -474,6 +507,107 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 				}
 				err = k8sClient.Status().Update(ctx, enee)
 				Expect(err).To(HaveOccurred(), "Should not update enne status with containerID that has invalid format", err)
+			})
+		})
+		Context("handles reconciliation errors with error labels", func() {
+			It("should mark the ENoExecEvent with error label when node is not found", func() {
+				// Create a pod first
+				podName := framework.GenerateName()
+				eneeName := framework.GenerateName()
+				pod := builder.NewPod().WithNamespace(testNamespace).WithName(podName).WithNodeName(testNodeName).
+					WithContainer("test-image", v1.PullAlways).
+					WithContainerStatuses(builder.NewContainerStatus().WithName(testContainerName).WithID(testContainerID).Build()).
+					Build()
+				createPodAndUpdateStatus(pod)
+
+				// Create ENoExecEvent with non-existent node and a finalizer to prevent immediate deletion
+				enee := defaultENoExecFormatError().
+					WithPodName(podName).
+					WithNodeName("non-existent-node").
+					WithName(eneeName).
+					WithFinalizer("test-finalizer").
+					Build()
+				createENEEAndUpdateStatus(enee)
+
+				// The ENoExecEvent should be marked with error label before deletion
+				By("Ensuring the ENoExecEvent is marked with error label")
+				ensureErrorLabel(eneeName, ErrorReasonNodeNotFound).
+					WithPolling(e2e.PollingInterval).WithTimeout(e2e.WaitShort).
+					Should(Succeed(), "ENoExecEvent should be labeled with node-not-found error")
+
+				// Remove the finalizer to allow deletion
+				removeFinalizerFromENEE(eneeName, "test-finalizer")
+
+				// The ENoExecEvent should be deleted
+				By("Ensuring the ENoExecEvent is deleted")
+				ensureDeletion(eneeName)
+
+				By("Deleting pod")
+				deletePod(podName)
+			})
+
+			It("should handle container ID not found gracefully", func() {
+				// Create a pod with a different container ID
+				podName := framework.GenerateName()
+				eneeName := framework.GenerateName()
+				pod := builder.NewPod().WithNamespace(testNamespace).WithName(podName).WithNodeName(testNodeName).
+					WithContainer("test-image", v1.PullAlways).
+					WithContainerStatuses(builder.NewContainerStatus().WithName(testContainerName).
+						WithID("cri-o://differentcontainerid1234567890abcdef1234567890abcdef12345678").Build()).
+					Build()
+				createPodAndUpdateStatus(pod)
+
+				// Create ENoExecEvent with non-matching container ID
+				enee := defaultENoExecFormatError().WithPodName(podName).WithName(eneeName).Build()
+				createENEEAndUpdateStatus(enee)
+
+				// Should still publish event with "unknown-container"
+				By("Ensuring the event is published with unknown container")
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(utils.UnknownContainer, testNodeArch)).
+					Should(Succeed(), "failed to get event for Pod with mismatched container ID")
+
+				By("Ensuring the pod is labeled with exec format error label even with unknown container")
+				ensureLabel(podName).Should(Succeed(), "Pod should be labeled even when container ID doesn't match")
+
+				By("Ensuring the ENoExecEvent is deleted")
+				ensureDeletion(eneeName)
+
+				By("Deleting pod")
+				deletePod(podName)
+			})
+
+			It("should not label pod when node doesn't match pod's nodeName", func() {
+				// Create a pod scheduled on a different node
+				podName := framework.GenerateName()
+				eneeName := framework.GenerateName()
+				pod := builder.NewPod().WithNamespace(testNamespace).WithName(podName).WithNodeName("different-node").
+					WithContainer("test-image", v1.PullAlways).
+					WithContainerStatuses(builder.NewContainerStatus().WithName(testContainerName).WithID(testContainerID).Build()).
+					Build()
+				createPodAndUpdateStatus(pod)
+
+				// Create ENoExecEvent with non-existent node and a finalizer to prevent immediate deletion
+				enee := defaultENoExecFormatError().WithPodName(podName).WithNodeName(testNodeName).WithName(eneeName).WithFinalizer("test-finalizer").Build()
+				createENEEAndUpdateStatus(enee)
+
+				// The ENoExecEvent should be marked with error label before deletion
+				By("Ensuring the ENoExecEvent is marked with error label")
+				ensureErrorLabel(eneeName, ErrorReasonNodeNotFound).
+					WithPolling(e2e.PollingInterval).WithTimeout(e2e.WaitShort).
+					Should(Succeed(), "ENoExecEvent should be labeled with node-not-found error when node doesn't match")
+
+				// Remove the finalizer to allow deletion
+				removeFinalizerFromENEE(eneeName, "test-finalizer")
+
+				// The ENoExecEvent should be deleted
+				By("Ensuring the ENoExecEvent is deleted")
+				ensureDeletion(eneeName)
+
+				By("Ensuring the pod is NOT labeled with exec format error label")
+				ensureLabel(podName).ShouldNot(Succeed(), "Pod should not be labeled when ENoExecEvent node doesn't match pod's node")
+
+				By("Deleting pod")
+				deletePod(podName)
 			})
 		})
 	})
