@@ -1029,7 +1029,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
 		})
 	})
-	Context("when CPPC has NodeAffinityScoring disabled but PPC has it enabled", func() {
+	Context("when CPPC has NodeAffinityScoring disabled ebut PPC has it enabled", func() {
 		It("should apply PPC preferred affinity to pods matching the PPC label selector", func() {
 			By("Creating a ClusterPodPlacementConfig with NodeAffinityScoring disabled")
 			err := client.Create(ctx,
