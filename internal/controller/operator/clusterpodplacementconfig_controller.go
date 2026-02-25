@@ -146,7 +146,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 			log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 0}, nil
 	}
 
 	// Handle the no-pod-placement-config finalizer
@@ -169,7 +169,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 			log.Error(err, "Unable to update finalizers on the ClusterPodPlacementConfig")
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: 0}, nil
 	}
 
 	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
@@ -181,7 +181,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 				log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 0}, nil
 		}
 
 		// Attempt to fetch the ENoExecEvent Deployment.
@@ -207,7 +207,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 					return ctrl.Result{}, err
 				}
 				// After a successful update, requeue to ensure the next state is processed.
-				return ctrl.Result{Requeue: true}, nil
+				return ctrl.Result{RequeueAfter: 0}, nil
 			}
 		}
 	}
