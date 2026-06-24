@@ -117,7 +117,7 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
 					Path: "/etc/docker/",
-					Type: utils.NewPtr(corev1.HostPathDirectoryOrCreate),
+					Type: utils.NewPtr(corev1.HostPathDirectory),
 				},
 			},
 		},
@@ -126,7 +126,7 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
 					Path: "/etc/containers/",
-					Type: utils.NewPtr(corev1.HostPathDirectoryOrCreate),
+					Type: utils.NewPtr(corev1.HostPathDirectory),
 				},
 			},
 		},
