@@ -41,7 +41,7 @@ func DockerCertsDir() string {
 	defer rwMutex.Unlock()
 	if dockerCertsDir == "" {
 		// avoid race condition in-between rwMutex.RUnlock and rwMutex.Lock
-		dockerCertsDir = lookupEnvOr("DOCKER_CERTS_DIR", "/etc/docker/certs.d")
+		dockerCertsDir = lookupEnvOr("DOCKER_CERTS_DIR", "")
 	}
 	return dockerCertsDir
 }
