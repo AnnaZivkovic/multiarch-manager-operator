@@ -61,6 +61,7 @@ import (
 // ClusterPodPlacementConfigReconciler reconciles a ClusterPodPlacementConfig object
 type ClusterPodPlacementConfigReconciler struct {
 	client.Client
+	APIReader     client.Reader
 	DynamicClient *dynamic.DynamicClient
 	Scheme        *runtime.Scheme
 	ClientSet     *kubernetes.Clientset
@@ -163,12 +164,14 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 	log := ctrllog.FromContext(ctx)
 	log.V(1).Info("+++++++++++++++++++ Reconciling ClusterPodPlacementConfig +++++++++++++++++++")
 	// Lookup the ClusterPodPlacementConfig instance for this reconcile request
-	clusterPodPlacementConfig := &multiarchv1beta1.ClusterPodPlacementConfig{}
+	clusterPodPlacementConfig := &multiarchv1beta1.ClusterPodPlacementConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: common.SingletonResourceObjectName,
+		},
+	}
 	var err error
 
-	if err = r.Get(ctx, client.ObjectKey{
-		Name: req.Name,
-	}, clusterPodPlacementConfig); err != nil {
+	if err = r.getCacheWithAPIFallback(ctx, clusterPodPlacementConfig); err != nil {
 		log.Error(err, "Unable to fetch ClusterPodPlacementConfig")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -180,8 +183,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 	case !clusterPodPlacementConfig.DeletionTimestamp.IsZero():
 		// Only execute deletion if the object is being deleted and the finalizer is present
 		if err := r.handleDelete(ctx, clusterPodPlacementConfig); err != nil {
-			var requeueErr *requeueAfterError
-			if errors.As(err, &requeueErr) {
+			if requeueErr, ok := errors.AsType[*requeueAfterError](err); ok {
 				log.V(1).Info("Requeuing after delay", "reason", requeueErr.msg, "after", requeueErr.duration)
 				return ctrl.Result{RequeueAfter: requeueErr.duration}, nil
 			}
@@ -273,8 +275,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 	}
 
 	if err := r.reconcile(ctx, clusterPodPlacementConfig); err != nil {
-		var requeueErr *requeueAfterError
-		if errors.As(err, &requeueErr) {
+		if requeueErr, ok := errors.AsType[*requeueAfterError](err); ok {
 			log.V(1).Info("Requeuing after delay", "reason", requeueErr.msg, "after", requeueErr.duration)
 			return ctrl.Result{RequeueAfter: requeueErr.duration}, nil
 		}
@@ -501,11 +502,13 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	// The pods have been ungated and no other errors occurred, so we can remove the finalizer
 	log.Info("Pods have been ungated")
 	log = log.WithValues("finalizer", utils.PodPlacementFinalizerName)
-	ppcDeployment := &appsv1.Deployment{}
-	err = r.Get(ctx, client.ObjectKey{
-		Name:      utils.PodPlacementControllerName,
-		Namespace: utils.Namespace(),
-	}, ppcDeployment)
+	ppcDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.PodPlacementControllerName,
+			Namespace: utils.Namespace(),
+		},
+	}
+	err = r.getCacheWithAPIFallback(ctx, ppcDeployment)
 	if client.IgnoreNotFound(err) != nil {
 		log.Error(err, "Unable to fetch the deployment")
 		return err
@@ -620,11 +623,13 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 		log.Error(err, "Unable to delete DaemonSet resources")
 		return err
 	}
-	ds := &appsv1.DaemonSet{}
-	err = r.Get(ctx, client.ObjectKey{
-		Name:      utils.EnoexecDaemonSet,
-		Namespace: utils.Namespace(),
-	}, ds)
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.EnoexecDaemonSet,
+			Namespace: utils.Namespace(),
+		},
+	}
+	err = r.getCacheWithAPIFallback(ctx, ds)
 	if err == nil {
 		log.Info("Waiting for the eNoExecEvent DaemonSet to be fully deleted...")
 		// Return an error to force requeue. This is a common pattern for waiting.
@@ -654,11 +659,13 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 	}
 
 	log.Info("No non-errored ENoExecEvent resources found in the cluster. Removing the ExecEvent finalizer from the ENoExec Deployment")
-	deployment := &appsv1.Deployment{}
-	err = r.Get(ctx, client.ObjectKey{
-		Name:      utils.EnoexecControllerName,
-		Namespace: utils.Namespace(),
-	}, deployment)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.EnoexecControllerName,
+			Namespace: utils.Namespace(),
+		},
+	}
+	err = r.getCacheWithAPIFallback(ctx, deployment)
 	if client.IgnoreNotFound(err) != nil {
 		log.Error(err, "Could not fetch ENoExecEvent Deployment")
 		return err
@@ -1109,6 +1116,34 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 		log.Info("Deleted errored ENoExecEvent resources during cleanup", "erroredCount", erroredCount)
 	}
 	return nonErroredCount, erroredCount
+}
+
+// getCacheWithAPIFallback fetches obj from the informer cache first. If Get returns
+// NotFound or the object is empty (no UID), it falls back to APIReader. ApplyResources
+// can create dependents before the informer observes them; a cache-only Get would skip
+// finalizer removal and leave the object stuck Terminating after CPPC is gone.
+func (r *ClusterPodPlacementConfigReconciler) getCacheWithAPIFallback(ctx context.Context, obj client.Object) error {
+	return getCacheWithAPIFallback(ctx, r.Client, r.APIReader, obj)
+}
+
+func getCacheWithAPIFallback(ctx context.Context, cache, api client.Reader, obj client.Object) error {
+	key := client.ObjectKeyFromObject(obj)
+	err := cache.Get(ctx, key, obj)
+	if err == nil && obj.GetUID() != "" {
+		return nil
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if api == nil {
+		if err != nil {
+			return err
+		}
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "objects"}, key.Name)
+	}
+	ctrllog.FromContext(ctx).V(1).Info("cache Get empty, falling back to APIReader",
+		"name", key.Name, "namespace", key.Namespace)
+	return api.Get(ctx, key, obj)
 }
 
 // cppcUpdatePredicate filters CPPC watch events to only reconcile on meaningful changes:
