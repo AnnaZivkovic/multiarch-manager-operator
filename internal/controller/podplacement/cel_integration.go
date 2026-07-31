@@ -34,20 +34,20 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 
 	// Check if plugin is enabled
 	if !ppc.PluginsEnabled(common.CelArchitecturePlacementPluginName) {
-		log.Info("CEL plugin not enabled", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+		log.V(2).Info("CEL plugin not enabled", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
 		return false
 	}
 
-	log.Info("CEL plugin enabled", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+	log.V(2).Info("CEL plugin enabled", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
 
 	// Access plugin directly, following existing pattern for NodeAffinityScoring
 	celPlugin := ppc.Spec.Plugins.CelArchitecturePlacement
 	if celPlugin == nil {
-		log.Info("celArchitecturePlacement plugin is nil", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+		log.V(2).Info("celArchitecturePlacement plugin is nil", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
 		return false
 	}
 
-	log.Info("Evaluating CEL rules", "PodPlacementConfig", ppc.Name, "pod", pod.Name, "ruleCount", len(celPlugin.Rules))
+	log.V(2).Info("Evaluating CEL rules", "PodPlacementConfig", ppc.Name, "pod", pod.Name, "ruleCount", len(celPlugin.Rules))
 
 	// Evaluate CEL rules
 	result, err := evaluateCELArchitecturePlacement(celPlugin.Rules, celPlugin.FallbackArchitectures, pod.PodObject())
@@ -59,19 +59,19 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 
 	// Apply the architecture constraints
 	if result.matched {
-		log.Info("CEL rule matched",
+		log.V(2).Info("CEL rule matched",
 			"PodPlacementConfig", ppc.Name,
 			"pod", pod.Name,
 			"ruleName", result.ruleName,
 			"architectures", result.architectures)
 	} else {
-		log.Info("No CEL rules matched - using fallback",
+		log.V(2).Info("No CEL rules matched - using fallback",
 			"PodPlacementConfig", ppc.Name,
 			"pod", pod.Name,
 			"fallbackArchitectures", result.architectures)
 	}
 
-	log.Info("Applying architecture constraints from CEL",
+	log.V(2).Info("Applying architecture constraints from CEL",
 		"pod", pod.Name,
 		"architectures", result.architectures)
 
@@ -88,7 +88,7 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 			fmt.Sprintf("No CEL rules matched, using fallback architectures from %s: %v", configSource, result.architectures))
 	}
 
-	log.Info("CEL architecture placement applied successfully",
+	log.V(2).Info("CEL architecture placement applied successfully",
 		"pod", pod.Name,
 		"PodPlacementConfig", ppc.Name)
 

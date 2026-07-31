@@ -22,7 +22,6 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
@@ -110,10 +109,11 @@ func podToMap(pod *corev1.Pod) map[string]interface{} {
 	if pod == nil {
 		return map[string]interface{}{
 			"metadata": map[string]interface{}{
-				"name":        "",
-				"namespace":   "",
-				"labels":      map[string]interface{}{},
-				"annotations": map[string]interface{}{},
+				"name":         "",
+				"generateName": "",
+				"namespace":    "",
+				"labels":       map[string]interface{}{},
+				"annotations":  map[string]interface{}{},
 			},
 		}
 	}
@@ -130,10 +130,11 @@ func podToMap(pod *corev1.Pod) map[string]interface{} {
 
 	return map[string]interface{}{
 		"metadata": map[string]interface{}{
-			"name":        pod.Name,
-			"namespace":   pod.Namespace,
-			"labels":      labels,
-			"annotations": annotations,
+			"name":         pod.Name,
+			"generateName": pod.GenerateName,
+			"namespace":    pod.Namespace,
+			"labels":       labels,
+			"annotations":  annotations,
 		},
 	}
 }
@@ -159,13 +160,12 @@ func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error
 		return false, fmt.Errorf("CEL evaluation error: %w", err)
 	}
 
-	// Convert result to boolean
-	result := ref.Val(val)
-	if result.Type() != types.BoolType {
-		return false, fmt.Errorf("CEL expression did not return a boolean: got %v", result.Type())
+	// val is already a ref.Val; check its type and extract the boolean
+	if val.Type() != types.BoolType {
+		return false, fmt.Errorf("CEL expression did not return a boolean: got %v", val.Type())
 	}
-
-	return result.Value().(bool), nil
+	// compile() guarantees a boolean result.
+	return val.Value().(bool), nil
 }
 
 // evaluateRules evaluates CEL rules in order and returns the first matching rule's architectures
