@@ -50,11 +50,38 @@ oc wait pods -n ${NAMESPACE} \
   --for=condition=Ready=True
 
 if [ "${USE_OLM:-}" == "true" ]; then
-  echo "Waiting for CSV to reach Succeeded phase..."
-  oc wait csv -n "${NAMESPACE}" \
-    -l "operators.coreos.com/multiarch-tuning-operator.${NAMESPACE}=" \
-    --for=jsonpath='{.status.phase}'=Succeeded \
-    --timeout=5m || echo "[WARN] CSV wait timed out, proceeding with tests"
+  echo "Waiting for CSV to exist..."
+  CSV_NAME=""
+  retries=0
+  while [ -z "${CSV_NAME}" ] && [ "${retries}" -lt 60 ]; do
+    set +e
+    csv_get_output=$(oc get csv -n "${NAMESPACE}" \
+      -l "operators.coreos.com/multiarch-tuning-operator.${NAMESPACE}=" \
+      -o custom-columns=NAME:.metadata.name --no-headers \
+      --request-timeout=30s 2>&1)
+    csv_get_rc=$?
+    set -e
+    if [ "${csv_get_rc}" -eq 0 ]; then
+      CSV_NAME=$(printf '%s\n' "${csv_get_output}" | awk 'NF { print $1; exit }')
+    elif echo "${csv_get_output}" | grep -qiE "forbidden|unauthorized"; then
+      echo "[ERROR] oc get csv failed (auth): ${csv_get_output}"
+      exit 1
+    fi
+    if [ -z "${CSV_NAME}" ]; then
+      sleep 5
+      retries=$((retries + 1))
+    fi
+  done
+  if [ -z "${CSV_NAME}" ]; then
+    echo "[WARN] No CSV found after 5 minutes, proceeding with tests"
+  else
+    echo "Waiting for CSV ${CSV_NAME} to reach Succeeded phase..."
+    if ! oc wait "csv/${CSV_NAME}" -n "${NAMESPACE}" \
+        --for=jsonpath='{.status.phase}'=Succeeded \
+        --timeout=5m; then
+      echo "[WARN] CSV did not reach Succeeded within 5m, proceeding with tests"
+    fi
+  fi
   echo "Waiting for operator to stabilize..."
   sleep 10
 fi

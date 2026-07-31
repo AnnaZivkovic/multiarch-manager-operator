@@ -161,24 +161,21 @@ var (
 	generations   []operatorv1.GenerationStatus
 )
 
-// ResetGenerations clears the generation tracking state. Intended for test isolation.
-func ResetGenerations() {
-	generationsMu.Lock()
-	defer generationsMu.Unlock()
-	generations = nil
-}
-
 // applyDeployment wraps library-go's ApplyDeployment with generation tracking so that
 // the spec-hash skip path works correctly. Without tracking, passing expectedGeneration=0
 // disables the skip path entirely, causing an Update on every reconcile.
 func applyDeployment(ctx context.Context, client appsv1client.DeploymentsGetter, recorder events.Recorder,
 	required *appsv1.Deployment) (*appsv1.Deployment, bool, error) {
 	generationsMu.Lock()
-	defer generationsMu.Unlock()
 	expectedGen := resourcemerge.ExpectedDeploymentGeneration(required, generations)
+	generationsMu.Unlock()
+
 	result, modified, err := resourceapply.ApplyDeployment(ctx, client, recorder, required, expectedGen)
+
 	if err == nil && result != nil {
+		generationsMu.Lock()
 		resourcemerge.SetDeploymentGeneration(&generations, result)
+		generationsMu.Unlock()
 	}
 	return result, modified, err
 }
@@ -187,11 +184,15 @@ func applyDeployment(ctx context.Context, client appsv1client.DeploymentsGetter,
 func applyDaemonSet(ctx context.Context, client appsv1client.DaemonSetsGetter, recorder events.Recorder,
 	required *appsv1.DaemonSet) (*appsv1.DaemonSet, bool, error) {
 	generationsMu.Lock()
-	defer generationsMu.Unlock()
 	expectedGen := resourcemerge.ExpectedDaemonSetGeneration(required, generations)
+	generationsMu.Unlock()
+
 	result, modified, err := resourceapply.ApplyDaemonSet(ctx, client, recorder, required, expectedGen)
+
 	if err == nil && result != nil {
+		generationsMu.Lock()
 		resourcemerge.SetDaemonSetGeneration(&generations, result)
+		generationsMu.Unlock()
 	}
 	return result, modified, err
 }
