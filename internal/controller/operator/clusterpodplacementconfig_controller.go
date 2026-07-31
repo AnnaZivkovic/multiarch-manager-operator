@@ -814,11 +814,10 @@ func (r *ClusterPodPlacementConfigReconciler) updateStatus(ctx context.Context, 
 		log.Error(err, "Unable to update conditions in the ClusterPodPlacementConfig")
 		return err
 	}
-	var err error = nil
 	if progressing {
-		err = errors.New(clusterPodPlacementConfigNotReady)
+		return newRequeueAfterError(5*time.Second, clusterPodPlacementConfigNotReady)
 	}
-	return err
+	return nil
 }
 
 func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig, ctx context.Context) ([]client.Object, error) {
@@ -1062,10 +1061,11 @@ func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager)
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&corev1.ServiceAccount{}).
-		Owns(&admissionv1.MutatingWebhookConfiguration{})
+		Owns(&admissionv1.MutatingWebhookConfiguration{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	if utils.IsResourceAvailable(context.Background(), r.DynamicClient,
 		monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		c = c.Owns(&monitoringv1.ServiceMonitor{}).Owns(&monitoringv1.PrometheusRule{})
+		c = c.Owns(&monitoringv1.ServiceMonitor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+			Owns(&monitoringv1.PrometheusRule{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
 	}
 	return c.Complete(r)
 }
