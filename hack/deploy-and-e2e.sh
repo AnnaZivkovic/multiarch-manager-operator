@@ -49,6 +49,16 @@ oc wait pods -n ${NAMESPACE} \
   -l control-plane=controller-manager \
   --for=condition=Ready=True
 
+if [ "${USE_OLM:-}" == "true" ]; then
+  echo "Waiting for CSV to reach Succeeded phase..."
+  oc wait csv -n "${NAMESPACE}" \
+    -l "operators.coreos.com/multiarch-tuning-operator.${NAMESPACE}=" \
+    --for=jsonpath='{.status.phase}'=Succeeded \
+    --timeout=5m || echo "[WARN] CSV wait timed out, proceeding with tests"
+  echo "Waiting for operator to stabilize..."
+  sleep 10
+fi
+
 make e2e
 
 if [ "${CLEANUP:-false}" == "false" ]; then
