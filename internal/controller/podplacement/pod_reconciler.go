@@ -264,7 +264,7 @@ func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []mu
 			continue
 		}
 
-		log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
+		log.V(1).Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
 		configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
 		pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
 	}

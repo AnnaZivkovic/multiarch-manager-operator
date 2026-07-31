@@ -1075,3 +1075,143 @@ func TestCELExpressionValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestPodToMap verifies that podToMap exposes all expected metadata fields including generateName.
+func TestPodToMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		wantMeta map[string]interface{}
+	}{
+		{
+			name: "nil pod returns empty metadata with generateName",
+			pod:  nil,
+			wantMeta: map[string]interface{}{
+				"name":         "",
+				"generateName": "",
+				"namespace":    "",
+				"labels":       map[string]interface{}{},
+				"annotations":  map[string]interface{}{},
+			},
+		},
+		{
+			name: "pod with generateName",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:         "",
+					GenerateName: "worker-",
+					Namespace:    "default",
+				},
+			},
+			wantMeta: map[string]interface{}{
+				"name":         "",
+				"generateName": "worker-",
+				"namespace":    "default",
+				"labels":       map[string]interface{}{},
+				"annotations":  map[string]interface{}{},
+			},
+		},
+		{
+			name: "pod with name and no generateName",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-pod",
+					Namespace: "ns",
+				},
+			},
+			wantMeta: map[string]interface{}{
+				"name":         "my-pod",
+				"generateName": "",
+				"namespace":    "ns",
+				"labels":       map[string]interface{}{},
+				"annotations":  map[string]interface{}{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := podToMap(tt.pod)
+			meta, ok := m["metadata"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("metadata is not map[string]interface{}")
+			}
+			for key, want := range tt.wantMeta {
+				got, exists := meta[key]
+				if !exists {
+					t.Errorf("metadata[%q] missing", key)
+					continue
+				}
+				// For maps, compare length only (sufficient for these tests)
+				wantMap, wantIsMap := want.(map[string]interface{})
+				gotMap, gotIsMap := got.(map[string]interface{})
+				if wantIsMap && gotIsMap {
+					if len(wantMap) != len(gotMap) {
+						t.Errorf("metadata[%q] map length: want %d, got %d", key, len(wantMap), len(gotMap))
+					}
+				} else if got != want {
+					t.Errorf("metadata[%q]: want %q, got %q", key, want, got)
+				}
+			}
+		})
+	}
+}
+
+// TestCELEvaluateGenerateName verifies that generateName is accessible in CEL expressions.
+func TestCELEvaluateGenerateName(t *testing.T) {
+	evaluator, err := newCELEvaluator()
+	if err != nil {
+		t.Fatalf("Failed to create CEL evaluator: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		expression     string
+		pod            *corev1.Pod
+		expectedResult bool
+	}{
+		{
+			name:       "match by generateName prefix",
+			expression: "self.metadata.generateName.startsWith('worker-')",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "worker-",
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name:       "no match when generateName differs",
+			expression: "self.metadata.generateName.startsWith('worker-')",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "redis-",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name:       "empty generateName does not match prefix",
+			expression: "self.metadata.generateName.startsWith('worker-')",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "explicit-name",
+				},
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := evaluator.evaluate(tt.expression, tt.pod)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if result != tt.expectedResult {
+				t.Errorf("expected %v, got %v", tt.expectedResult, result)
+			}
+		})
+	}
+}

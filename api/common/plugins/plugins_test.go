@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
@@ -222,6 +223,96 @@ func TestLocalPluginChecks_CelArchitecturePlacement(t *testing.T) {
 			result := checkFunc(tt.plugins)
 			if result != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
+	tests := []struct {
+		name          string
+		rules         []ArchitectureRule
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:        "no rules succeeds",
+			rules:       nil,
+			expectError: false,
+		},
+		{
+			name: "valid boolean expression succeeds",
+			rules: []ArchitectureRule{
+				{
+					Name:          "rule1",
+					Expression:    "self.metadata.name == 'test'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid CEL syntax is rejected",
+			rules: []ArchitectureRule{
+				{
+					Name:          "bad-rule",
+					Expression:    "self.metadata.name ==",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: `"bad-rule"`,
+		},
+		{
+			name: "non-boolean expression is rejected",
+			rules: []ArchitectureRule{
+				{
+					Name:          "non-bool",
+					Expression:    "self.metadata.name",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: `"non-bool"`,
+		},
+		{
+			name: "multiple rules validated; second rule invalid",
+			rules: []ArchitectureRule{
+				{
+					Name:          "ok-rule",
+					Expression:    "self.metadata.name == 'test'",
+					Architectures: []string{"amd64"},
+				},
+				{
+					Name:          "bad-rule",
+					Expression:    "self.metadata.name ==",
+					Architectures: []string{"ppc64le"},
+				},
+			},
+			expectError:   true,
+			errorContains: `"bad-rule"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := &CelArchitecturePlacement{
+				FallbackArchitectures: []string{"amd64"},
+				Rules:                 tt.rules,
+			}
+
+			err := plugin.ValidateCELExpressions()
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error but got: %v", err)
+				}
 			}
 		})
 	}

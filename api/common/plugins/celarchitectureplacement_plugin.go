@@ -19,6 +19,8 @@ package plugins
 import (
 	"fmt"
 
+	"github.com/google/cel-go/cel"
+
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -107,6 +109,29 @@ func (c *CelArchitecturePlacement) ValidateArchitectures() error {
 			if !validArchs[arch] {
 				return fmt.Errorf("invalid architecture in rule %s: %s", rule.Name, arch)
 			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateCELExpressions validates all CEL expressions in the plugin's rules
+// at admission time, ensuring they compile and return a boolean.
+func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
+	env, err := cel.NewEnv(
+		cel.Variable("self", cel.DynType),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	for _, rule := range c.Rules {
+		ast, issues := env.Compile(rule.Expression)
+		if issues != nil && issues.Err() != nil {
+			return fmt.Errorf("invalid CEL expression in rule %q: CEL compilation error: %w", rule.Name, issues.Err())
+		}
+		if ast.OutputType() != cel.BoolType {
+			return fmt.Errorf("invalid CEL expression in rule %q: CEL expression must return a boolean, got %v", rule.Name, ast.OutputType())
 		}
 	}
 
