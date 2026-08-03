@@ -871,7 +871,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							[]plugins.ArchitectureRule{
 								{
 									Name:          "unicode-rule",
-									Expression:    "has(self.metadata.labels['app.kubernetes.io/name'])",
+									Expression:    "'app.kubernetes.io/name' in self.metadata.labels",
 									Architectures: []string{"arm64"},
 								},
 							},

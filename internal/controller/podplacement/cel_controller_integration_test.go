@@ -255,7 +255,7 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Rules: []plugins.ArchitectureRule{
 					{
 						Name:          "match-nothing",
-						Expression:    `has(self.metadata.labels["never-matches"]) && self.metadata.labels["never-matches"] == "true"`,
+						Expression:    `"never-matches" in self.metadata.labels && self.metadata.labels["never-matches"] == "true"`,
 						Architectures: []string{utils.ArchitectureArm64},
 					},
 				},

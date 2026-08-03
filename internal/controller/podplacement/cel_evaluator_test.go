@@ -79,7 +79,7 @@ func TestCELEvaluatorCompile(t *testing.T) {
 		},
 		{
 			name:        "valid label check with bracket notation",
-			expression:  "has(self.metadata.labels['app.kubernetes.io/component']) && self.metadata.labels['app.kubernetes.io/component'] == 'database'",
+			expression:  "'app.kubernetes.io/component' in self.metadata.labels && self.metadata.labels['app.kubernetes.io/component'] == 'database'",
 			expectError: false,
 		},
 		{
@@ -951,7 +951,7 @@ func TestCELMapAccessSyntax(t *testing.T) {
 		},
 		{
 			name:           "bracket notation for labels with dots",
-			expression:     "has(self.metadata.labels['app.kubernetes.io/component']) && self.metadata.labels['app.kubernetes.io/component'] == 'database'",
+			expression:     "'app.kubernetes.io/component' in self.metadata.labels && self.metadata.labels['app.kubernetes.io/component'] == 'database'",
 			expectedResult: true,
 			expectError:    false,
 			description:    "Verify bracket notation works for labels with special characters",
@@ -1031,7 +1031,7 @@ func TestCELExpressionValidation(t *testing.T) {
 		},
 		{
 			name:        "valid bracket notation",
-			expression:  "has(self.metadata.labels['app.kubernetes.io/component'])",
+			expression:  "'app.kubernetes.io/component' in self.metadata.labels",
 			expectError: false,
 			description: "Bracket notation should be valid",
 		},

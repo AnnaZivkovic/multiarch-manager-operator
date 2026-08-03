@@ -432,8 +432,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 					{
 						Name: "wkc-component-label-rule",
 						// Match pods with label "wkc-component=true".
-						// Bracket notation required: the key contains a hyphen.
-						Expression:    `has(self.metadata.labels["wkc-component"]) && self.metadata.labels["wkc-component"] == "true"`,
+						// 'key' in self.metadata.labels is the supported CEL membership-test syntax.
+						Expression:    `"wkc-component" in self.metadata.labels && self.metadata.labels["wkc-component"] == "true"`,
 						Architectures: []string{utils.ArchitectureAmd64},
 					},
 				},
