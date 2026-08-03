@@ -209,7 +209,7 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 			skippedArchitectures = append(skippedArchitectures, nodeAffinityScoringPlatformTerm.Architecture)
 			// Track that this architecture was skipped from this source
 			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, false)
-			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
+			log.V(3).Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
 		}
 	}
 
@@ -358,7 +358,7 @@ func (pod *Pod) imagesNamesSet() sets.Set[containerImage] {
 func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (supportedArchitectures []string, err error) {
 	log := ctrllog.FromContext(pod.Ctx())
 	imageNamesSet := pod.imagesNamesSet()
-	log.Info("Image inspection: Starting", "pod", pod.Name, "namespace", pod.Namespace, "imageCount", imageNamesSet.Len())
+	log.V(2).Info("Image inspection: Starting", "pod", pod.Name, "namespace", pod.Namespace, "imageCount", imageNamesSet.Len())
 
 	// https://github.com/containers/skopeo/blob/v1.11.1/cmd/skopeo/inspect.go#L72
 	// Iterate over the images, get their architectures and intersect (as in set intersection) them each other
@@ -369,7 +369,7 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 	imageIndex := 0
 	for imageContainer := range imageNamesSet {
 		imageIndex++
-		log.Info("Image inspection: Inspecting image",
+		log.V(3).Info("Image inspection: Inspecting image",
 			"pod", pod.Name,
 			"imageIndex", imageIndex,
 			"totalImages", imageNamesSet.Len(),
@@ -392,7 +392,7 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 		}
 
 		archList := sets.List(currentImageSupportedArchitectures)
-		log.Info("Image inspection: Image architectures detected",
+		log.V(3).Info("Image inspection: Image architectures detected",
 			"pod", pod.Name,
 			"imageName", imageContainer.imageName,
 			"architectures", archList)
@@ -403,7 +403,7 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 			beforeIntersection := sets.List(supportedArchitecturesSet)
 			supportedArchitecturesSet = supportedArchitecturesSet.Intersection(currentImageSupportedArchitectures)
 			afterIntersection := sets.List(supportedArchitecturesSet)
-			log.Info("Image inspection: Architecture intersection",
+			log.V(3).Info("Image inspection: Architecture intersection",
 				"pod", pod.Name,
 				"before", beforeIntersection,
 				"current", archList,
@@ -412,7 +412,7 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 	}
 
 	finalArchitectures := sets.List(supportedArchitecturesSet)
-	log.Info("Image inspection: Completed",
+	log.V(2).Info("Image inspection: Completed",
 		"pod", pod.Name,
 		"namespace", pod.Namespace,
 		"finalArchitectures", finalArchitectures)
@@ -472,7 +472,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 	log := ctrllog.FromContext(pod.Ctx())
 
 	cppcPresent := cppc != nil
-	log.Info("[SHOULD_IGNORE] ENTER",
+	log.V(4).Info("shouldIgnorePod enter",
 		"pod", pod.Name,
 		"namespace", pod.Namespace,
 		"matchingPPCCount", len(matchingPPCs),
@@ -483,11 +483,11 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 		"nodeName", pod.Spec.NodeName,
 		"phase", pod.Status.Phase)
 
-	defer log.Info("[SHOULD_IGNORE] EXIT", "pod", pod.Name, "namespace", pod.Namespace)
+	defer log.V(4).Info("shouldIgnorePod exit", "pod", pod.Name, "namespace", pod.Namespace)
 
 	// Check operator namespace
 	if utils.Namespace() == pod.Namespace {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod is in operator namespace",
@@ -497,7 +497,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 
 	// Check kube- prefix
 	if strings.HasPrefix(pod.Namespace, "kube-") {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod namespace has kube- prefix")
@@ -506,7 +506,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 
 	// Check if pod already assigned to node
 	if pod.Spec.NodeName != "" {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod already assigned to node",
@@ -516,7 +516,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 
 	// Check control plane node selector
 	if pod.HasControlPlaneNodeSelector() {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod has control plane node selector")
@@ -525,7 +525,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 
 	// Check if from DaemonSet
 	if pod.IsFromDaemonSet() {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod is from DaemonSet",
@@ -535,27 +535,22 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 
 	// Check architecture configuration
 	isNodeSelectorConfigured := pod.isNodeSelectorConfiguredForArchitecture()
-	log.Info("[SHOULD_IGNORE] Architecture check",
+	log.V(4).Info("shouldIgnorePod architecture check",
 		"pod", pod.Name,
 		"isNodeSelectorConfiguredForArchitecture", isNodeSelectorConfigured)
 
 	if !isNodeSelectorConfigured {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "architecture not configured in nodeSelector - pod should be processed",
-			"result", false)
 		return false
 	}
 
 	// Architecture is configured, check if we should still ignore
 	isPreferredConfigured := pod.isPreferredAffinityConfiguredForArchitecture()
-	log.Info("[SHOULD_IGNORE] Preferred affinity check",
+	log.V(4).Info("shouldIgnorePod preferred affinity check",
 		"pod", pod.Name,
 		"isPreferredAffinityConfiguredForArchitecture", isPreferredConfigured)
 
 	if isPreferredConfigured {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "architecture configured in nodeSelector AND preferred affinity configured")
@@ -566,24 +561,19 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 	cppcPluginEnabled := cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)
 	hasMatchingPPCWithPlugin := pod.hasMatchingPPCWithPlugin(matchingPPCs)
 
-	log.Info("[SHOULD_IGNORE] Plugin check",
+	log.V(4).Info("shouldIgnorePod plugin check",
 		"pod", pod.Name,
 		"cppcPluginEnabled", cppcPluginEnabled,
 		"hasMatchingPPCWithPlugin", hasMatchingPPCWithPlugin)
 
 	if !cppcPluginEnabled && !hasMatchingPPCWithPlugin {
-		log.Info("[SHOULD_IGNORE] RETURN",
+		log.V(3).Info("Ignoring pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "architecture configured in nodeSelector AND preferred affinity not configured AND no plugins enabled (CPPC and all matching PPCs have NodeAffinityScoring disabled)")
 		return true
 	}
 
-	log.Info("[SHOULD_IGNORE] RETURN",
-		"pod", pod.Name,
-		"namespace", pod.Namespace,
-		"reason", "pod should be processed - architecture configured but plugins are enabled",
-		"result", false)
 	return false
 }
 
