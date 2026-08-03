@@ -18,8 +18,10 @@ package plugins
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -99,7 +101,7 @@ func (c *CelArchitecturePlacement) ValidateArchitectures() error {
 	// Validate fallback architectures
 	for _, arch := range c.FallbackArchitectures {
 		if !validArchs[arch] {
-			return fmt.Errorf("invalid default architecture: %s", arch)
+			return fmt.Errorf("invalid fallback architecture: %s", arch)
 		}
 	}
 
@@ -116,7 +118,11 @@ func (c *CelArchitecturePlacement) ValidateArchitectures() error {
 }
 
 // ValidateCELExpressions validates all CEL expressions in the plugin's rules
-// at admission time, ensuring they compile and return a boolean.
+// at admission time. Validation ensures:
+//  1. Each expression compiles without syntax errors.
+//  2. Each expression returns a boolean value.
+//  3. No expression references self.spec.* or self.status.* fields
+//     (assertMetadataOnly: only self.metadata.* is permitted).
 func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
 	env, err := cel.NewEnv(
 		cel.Variable("self", cel.DynType),
@@ -133,7 +139,58 @@ func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
 		if ast.OutputType() != cel.BoolType {
 			return fmt.Errorf("invalid CEL expression in rule %q: CEL expression must return a boolean, got %v", rule.Name, ast.OutputType())
 		}
+		// Enforce metadata-only field allow-list: reject any reference to self.spec.*
+		// or self.status.* so that expressions cannot read sensitive workload data.
+		if err := assertMetadataOnly(ast, rule.Name); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+// assertMetadataOnly inspects the compiled CEL AST and returns an error if any
+// field-selection path starting from the 'self' variable descends into
+// self.spec or self.status. Only self.metadata.* is permitted.
+//
+// Enhancement reference: §"CEL Data Scope and Field Allow-list"
+// "Any reference to self.spec or self.status … is rejected at PodPlacementConfig
+// create/update time (assertMetadataOnly)."
+func assertMetadataOnly(ast *cel.Ast, ruleName string) error {
+	nav := celast.NavigateAST(ast.NativeRep())
+	selectNodes := celast.MatchDescendants(nav, celast.KindMatcher(celast.SelectKind))
+	for _, node := range selectNodes {
+		path := selectPath(node)
+		// path is in order from root to leaf, e.g.
+		// self.spec.containers → ["self", "spec", "containers"]
+		// Reject any path of the form ["self", "spec", ...] or ["self", "status", ...]
+		if len(path) >= 2 && path[0] == "self" {
+			if path[1] == "spec" || path[1] == "status" {
+				return fmt.Errorf("invalid CEL expression in rule %q: "+
+					"references a disallowed field 'self.%s': "+
+					"only self.metadata.* is permitted",
+					ruleName, strings.Join(path[1:], "."))
+			}
+		}
+	}
+	return nil
+}
+
+// selectPath reconstructs the dotted field path for a select expression node
+// by walking the operand chain back to the root identifier.
+// Returns the path segments from root to leaf, e.g. ["self", "spec", "containers"].
+// Returns nil if the root is not an identifier (e.g. a function call result).
+func selectPath(node celast.NavigableExpr) []string {
+	var segments []string
+	cur := celast.Expr(node)
+	for cur.Kind() == celast.SelectKind {
+		sel := cur.AsSelect()
+		segments = append([]string{sel.FieldName()}, segments...)
+		cur = sel.Operand()
+	}
+	if cur.Kind() == celast.IdentKind {
+		segments = append([]string{cur.AsIdent()}, segments...)
+		return segments
+	}
 	return nil
 }

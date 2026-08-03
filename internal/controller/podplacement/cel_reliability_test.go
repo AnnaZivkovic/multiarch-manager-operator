@@ -301,7 +301,8 @@ func TestIdempotentRepeatedReconcile(t *testing.T) {
 
 	architectures := []string{"ppc64le", "arm64"}
 
-	// Apply multiple times with SAME architectures
+	// Apply multiple times with SAME architectures — applyArchitectureConstraints
+	// removes and re-applies, so the result is always exactly 1 term (idempotent).
 	for i := 0; i < 5; i++ {
 		applyArchitectureConstraints(pod, architectures)
 
@@ -321,26 +322,21 @@ func TestIdempotentRepeatedReconcile(t *testing.T) {
 		}
 
 		terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-		// Architecture terms accumulate (i+1 terms after i applications)
-		// This is acceptable because:
-		// 1. All terms have identical architecture values (ppc64le, arm64)
-		// 2. NodeSelectorTerms are OR conditions, so multiple identical terms are functionally equivalent
-		// 3. In real reconciliation, the pod is scheduled after first application
-		if len(terms) != i+1 {
-			t.Errorf("Iteration %d: Expected %d terms, got %d", i, i+1, len(terms))
+		// Each application removes stale arch and re-applies fresh, so there is
+		// always exactly 1 term regardless of how many times we reconcile.
+		if len(terms) != 1 {
+			t.Errorf("Iteration %d: Expected 1 term (idempotent), got %d", i, len(terms))
 		}
 
-		// Verify all terms have the correct architectures
-		for j, term := range terms {
-			if len(term.MatchExpressions) != 1 {
-				t.Errorf("Iteration %d, term %d: Expected 1 match expression, got %d", i, j, len(term.MatchExpressions))
-			}
-			if term.MatchExpressions[0].Key != utils.ArchLabel {
-				t.Errorf("Iteration %d, term %d: Expected architecture key, got %s", i, j, term.MatchExpressions[0].Key)
-			}
-			if len(term.MatchExpressions[0].Values) != 2 {
-				t.Errorf("Iteration %d, term %d: Expected 2 architecture values, got %d", i, j, len(term.MatchExpressions[0].Values))
-			}
+		// Verify the single term has the correct architectures
+		if len(terms[0].MatchExpressions) != 1 {
+			t.Errorf("Iteration %d: Expected 1 match expression, got %d", i, len(terms[0].MatchExpressions))
+		}
+		if terms[0].MatchExpressions[0].Key != utils.ArchLabel {
+			t.Errorf("Iteration %d: Expected architecture key, got %s", i, terms[0].MatchExpressions[0].Key)
+		}
+		if len(terms[0].MatchExpressions[0].Values) != 2 {
+			t.Errorf("Iteration %d: Expected 2 architecture values, got %d", i, len(terms[0].MatchExpressions[0].Values))
 		}
 	}
 }

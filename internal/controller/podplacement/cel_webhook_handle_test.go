@@ -43,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/panjf2000/ants/v2"
@@ -69,22 +70,27 @@ func buildHandleRequest(t *testing.T, pod *corev1.Pod) admission.Request {
 	}
 }
 
-// newHandleWebhook returns a webhook whose client.List will fail (nil client),
-// triggering the "fail open" path that produces an empty PPC list.  The scheme
-// is populated so that admission.NewDecoder can decode Pods.
+// newHandleWebhook returns a webhook wired with a fake controller-runtime
+// client (empty store) so that client.List returns an empty PPC list without
+// hitting a real API server.  The scheme is populated so that
+// admission.NewDecoder can decode Pods.
 func newHandleWebhook(t *testing.T) *PodSchedulingGateMutatingWebHook {
 	t.Helper()
 	s := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(s); err != nil {
 		t.Fatalf("add core scheme: %v", err)
 	}
+	if err := v1beta1.AddToScheme(s); err != nil {
+		t.Fatalf("add multiarch scheme: %v", err)
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
 	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
 	if err != nil {
 		t.Fatalf("ants pool: %v", err)
 	}
 	// clientSet nil is safe: the async delayedSchedulingGatedEvent goroutine will
 	// no-op because the pool submit will error immediately.
-	return NewPodSchedulingGateMutatingWebHook(nil, nil, s, record.NewFakeRecorder(32), pool)
+	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, s, record.NewFakeRecorder(32), pool)
 }
 
 // TestHandleAdmission_ResponseAllowed verifies that Handle() returns

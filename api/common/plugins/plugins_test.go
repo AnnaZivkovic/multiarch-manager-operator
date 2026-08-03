@@ -82,7 +82,7 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			fallbackArchitectures: []string{"invalid-arch"},
 			rules:                 nil,
 			expectError:           true,
-			errorContains:         "invalid default architecture: invalid-arch",
+			errorContains:         "invalid fallback architecture: invalid-arch",
 		},
 		{
 			name:                  "valid rule architectures",
@@ -291,6 +291,130 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 			},
 			expectError:   true,
 			errorContains: `"bad-rule"`,
+		},
+		// assertMetadataOnly: self.spec.* and self.status.* must be rejected
+		{
+			name: "self.spec reference is rejected (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "spec-rule",
+					Expression:    "self.spec.nodeName == 'worker-1'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: "disallowed field",
+		},
+		{
+			name: "self.status reference is rejected (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "status-rule",
+					Expression:    "self.status.phase == 'Running'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: "disallowed field",
+		},
+		{
+			name: "self.spec.containers reference is rejected (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "containers-rule",
+					Expression:    "size(self.spec.containers) > 0",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: "disallowed field",
+		},
+		{
+			name: "self.metadata reference is permitted (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "labels-rule",
+					Expression:    "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "self.metadata.namespace is permitted (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "namespace-rule",
+					Expression:    "self.metadata.namespace == 'production'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "self.metadata.annotations is permitted (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "annotations-rule",
+					Expression:    "'config.company.io/tier' in self.metadata.annotations && self.metadata.annotations['config.company.io/tier'] == 'gpu'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "has(self.spec.nodeName) is rejected (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "has-spec-rule",
+					Expression:    "has(self.spec.nodeName)",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: "disallowed field",
+		},
+		{
+			name: "multiple rules; first valid, second spec reference rejected",
+			rules: []ArchitectureRule{
+				{
+					Name:          "valid-rule",
+					Expression:    "self.metadata.name == 'test'",
+					Architectures: []string{"amd64"},
+				},
+				{
+					Name:          "spec-rule",
+					Expression:    "self.spec.serviceAccountName == 'default'",
+					Architectures: []string{"ppc64le"},
+				},
+			},
+			expectError:   true,
+			errorContains: `"spec-rule"`,
+		},
+		// Regression: comprehension (exists) traverses self.spec.* — must be rejected
+		{
+			name: "comprehension over self.spec.containers is rejected (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "exists-rule",
+					Expression:    `self.spec.containers.exists(c, c.name == "nginx")`,
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: "disallowed field",
+		},
+		// Regression: constant expression has no Select nodes — assertMetadataOnly must not reject it
+		{
+			name: "constant expression true is permitted (assertMetadataOnly)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "const-rule",
+					Expression:    "true",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
 		},
 	}
 

@@ -104,10 +104,14 @@ func applyArchitectureConstraints(pod *corev1.Pod, architectures []string) bool 
 		return false
 	}
 
-	// Remove architecture from nodeSelector (this is safe and doesn't cause API rejections)
-	removeArchitectureFromNodeSelector(pod)
+	// Remove all existing architecture constraints first so that stale arch-only
+	// NodeSelectorTerms (set by a previous MTO invocation) are cleaned up before
+	// the new architecture is applied.  This avoids accumulating duplicate terms
+	// across repeated invocations and ensures the fresh arch replaces the stale one.
+	removeAllArchitectureConstraints(pod)
 
-	// Update architecture constraints in-place within node affinity
+	// Apply the new architecture constraints (creates a new term or merges into
+	// existing non-arch terms).
 	applyArchitectureNodeAffinity(pod, architectures)
 
 	// Always return true because we always modify the pod by applying architecture constraints
