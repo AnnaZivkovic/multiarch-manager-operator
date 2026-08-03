@@ -19,6 +19,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -79,6 +80,19 @@ func (e *requeueAfterError) Error() string { return e.msg }
 
 func newRequeueAfterError(d time.Duration, msg string) error {
 	return &requeueAfterError{duration: d, msg: msg}
+}
+
+// mergeWithStatusErr combines primary reconcile errors with the result of
+// updateStatus. If statusErr is a *requeueAfterError it takes priority so that
+// errors.As in Reconcile() can unwrap it for a clean requeue instead of falling
+// through to exponential backoff. Primary errors are already logged at their
+// call sites.
+func mergeWithStatusErr(statusErr error, primaryErrs ...error) error {
+	var requeueErr *requeueAfterError
+	if errors.As(statusErr, &requeueErr) {
+		return statusErr
+	}
+	return errorutils.NewAggregate(append(primaryErrs, statusErr))
 }
 
 const (
@@ -730,7 +744,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 	}
 	if err := r.ensureNamespaceLabels(ctx); err != nil {
 		log.Error(err, "Unable to ensure namespace labels")
-		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), err)
 	}
 	clusterPodPlacementConfigObjects, err := r.buildPodPlacementConfigObjects(clusterPodPlacementConfig, ctx)
 	if err != nil {
@@ -783,12 +797,12 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 	}
 
 	if len(errs) > 0 {
-		return errorutils.NewAggregate(append(errs, r.updateStatus(ctx, clusterPodPlacementConfig)))
+		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), errs...)
 	}
 
 	if err := utils.ApplyResources(ctx, r.ClientSet, r.DynamicClient, r.Recorder, objects); err != nil {
 		log.Error(err, "Unable to apply resources")
-		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), err)
 	}
 
 	return r.updateStatus(ctx, clusterPodPlacementConfig)
@@ -1027,7 +1041,25 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	c := ctrl.NewControllerManagedBy(mgr).
-		For(&multiarchv1beta1.ClusterPodPlacementConfig{}).
+		For(&multiarchv1beta1.ClusterPodPlacementConfig{},
+			builder.WithPredicates(predicate.Funcs{
+				CreateFunc: func(e event.CreateEvent) bool { return true },
+				DeleteFunc: func(e event.DeleteEvent) bool { return true },
+				UpdateFunc: func(e event.UpdateEvent) bool {
+					if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+						return true
+					}
+					if !e.ObjectOld.GetDeletionTimestamp().Equal(e.ObjectNew.GetDeletionTimestamp()) {
+						return true
+					}
+					if !slices.Equal(e.ObjectOld.GetFinalizers(), e.ObjectNew.GetFinalizers()) {
+						return true
+					}
+					return false
+				},
+				GenericFunc: func(e event.GenericEvent) bool { return true },
+			}),
+		).
 		// Watch PodPlacementConfig to reconcile ClusterPodPlacementConfig only on create/delete events.
 		// Updates to PodPlacementConfig are intentionally ignored.
 		Watches(
