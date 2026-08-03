@@ -37,19 +37,22 @@ type celEvaluator struct {
 var (
 	// packageEvaluator is a package-level evaluator for expression caching
 	packageEvaluator *celEvaluator
+	// packageEvaluatorErr holds the initialization error so subsequent calls can
+	// surface it rather than silently returning a nil evaluator.
+	packageEvaluatorErr error
 	// evaluatorOnce ensures the evaluator is initialized only once
 	evaluatorOnce sync.Once
 )
 
-// getOrCreateEvaluator returns the package-level evaluator, creating it if necessary
-// This enables expression caching across pod evaluations as specified in the enhancement
+// getOrCreateEvaluator returns the package-level evaluator, creating it if necessary.
+// This enables expression caching across pod evaluations as specified in the enhancement.
+// If initialization failed the first time, every subsequent call returns the same error.
 func getOrCreateEvaluator() (*celEvaluator, error) {
-	var initErr error
 	evaluatorOnce.Do(func() {
-		packageEvaluator, initErr = newCELEvaluator()
+		packageEvaluator, packageEvaluatorErr = newCELEvaluator()
 	})
-	if initErr != nil {
-		return nil, initErr
+	if packageEvaluatorErr != nil {
+		return nil, packageEvaluatorErr
 	}
 	return packageEvaluator, nil
 }
@@ -139,9 +142,10 @@ func podToMap(pod *corev1.Pod) map[string]interface{} {
 	}
 }
 
-// evaluate evaluates a CEL expression against a Pod
-// Returns true if the expression matches, false otherwise
-// Evaluation errors are treated as false (non-matching)
+// evaluate evaluates a CEL expression against a Pod.
+// Returns true if the expression matches, false otherwise.
+// Errors from compilation or runtime evaluation are returned to the caller;
+// it is the caller's responsibility to decide how to handle them (e.g. skip or abort).
 func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error) {
 	prog, err := e.compile(expression)
 	if err != nil {
@@ -156,34 +160,36 @@ func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error
 		"self": podMap,
 	})
 	if err != nil {
-		// Evaluation errors are treated as non-matches per enhancement doc
 		return false, fmt.Errorf("CEL evaluation error: %w", err)
 	}
 
-	// val is already a ref.Val; check its type and extract the boolean
+	// Belt-and-suspenders: compile() already rejects non-boolean expressions,
+	// but check the runtime type to guard against unexpected cel-go behaviour.
 	if val.Type() != types.BoolType {
 		return false, fmt.Errorf("CEL expression did not return a boolean: got %v", val.Type())
 	}
-	// compile() guarantees a boolean result.
 	return val.Value().(bool), nil
 }
 
-// evaluateRules evaluates CEL rules in order and returns the first matching rule's architectures
-// Returns nil if no rules match
+// evaluateRules evaluates CEL rules in order and returns the first matching rule's architectures.
+// Returns nil architectures and an empty rule name if no rules match.
+// Rules that fail evaluation (e.g. a runtime error against a specific pod) are skipped and
+// evaluation continues with the next rule. This soft-failure model keeps pod admission alive
+// even when a single expression has an unexpected runtime fault.
 func (e *celEvaluator) evaluateRules(rules []plugins.ArchitectureRule, pod *corev1.Pod) ([]string, string, error) {
 	for _, rule := range rules {
 		matched, err := e.evaluate(rule.Expression, pod)
 		if err != nil {
-			// Log the error but continue to next rule per enhancement doc
-			// The caller should log this appropriately
+			// Runtime evaluation errors are skipped so that a single bad expression does not
+			// block all subsequent rules. The caller receives a non-error return (nil, "", nil)
+			// only when *all* rules are exhausted; a per-rule skip is intentional.
 			continue
 		}
 		if matched {
-			// First match wins
+			// First match wins; remaining rules are not evaluated.
 			return rule.Architectures, rule.Name, nil
 		}
 	}
-	// No rules matched
 	return nil, "", nil
 }
 

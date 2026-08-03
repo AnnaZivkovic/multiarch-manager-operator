@@ -198,8 +198,9 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 
 		celPlugin := ppc.Spec.Plugins.CelArchitecturePlacement
 		if celPlugin == nil {
-			// This should never happen due to webhook validation, but handle defensively
-			log.Error(nil, "CEL plugin enabled but configuration is nil", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+			// Should not occur: webhook validation ensures the plugin is non-nil when enabled.
+			log.V(1).Info("CEL plugin enabled but configuration is nil; skipping",
+				"PodPlacementConfig", ppc.Name, "pod", pod.Name)
 			return
 		}
 
