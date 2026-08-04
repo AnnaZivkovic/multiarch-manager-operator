@@ -170,8 +170,8 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got none")
-				} else if tt.errorContains != "" && err.Error() != tt.errorContains {
-					t.Errorf("Expected error containing '%s', got '%s'", tt.errorContains, err.Error())
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain %q, got: %v", tt.errorContains, err)
 				}
 			} else {
 				if err != nil {
@@ -230,10 +230,11 @@ func TestLocalPluginChecks_CelArchitecturePlacement(t *testing.T) {
 
 func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 	tests := []struct {
-		name          string
-		rules         []ArchitectureRule
-		expectError   bool
-		errorContains string
+		name             string
+		rules            []ArchitectureRule
+		expectError      bool
+		errorContains    []string
+		errorNotContains []string
 	}{
 		{
 			name:        "no rules succeeds",
@@ -261,7 +262,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 				},
 			},
 			expectError:   true,
-			errorContains: `"bad-rule"`,
+			errorContains: []string{`"bad-rule"`, "Syntax error"},
 		},
 		{
 			name: "non-boolean expression is rejected",
@@ -273,7 +274,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 				},
 			},
 			expectError:   true,
-			errorContains: `"non-bool"`,
+			errorContains: []string{`"non-bool"`, "must return a boolean"},
 		},
 		{
 			name: "multiple rules validated; second rule invalid",
@@ -290,11 +291,11 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 				},
 			},
 			expectError:   true,
-			errorContains: `"bad-rule"`,
+			errorContains: []string{`"bad-rule"`, "Syntax error"},
 		},
-		// assertMetadataOnly: self.spec.* and self.status.* must be rejected
+		// Typed admission validation rejects self.spec.* and self.status.*.
 		{
-			name: "self.spec reference is rejected (assertMetadataOnly)",
+			name: "self.spec reference is rejected",
 			rules: []ArchitectureRule{
 				{
 					Name:          "spec-rule",
@@ -302,11 +303,12 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"amd64"},
 				},
 			},
-			expectError:   true,
-			errorContains: "disallowed field",
+			expectError:      true,
+			errorContains:    []string{`"spec-rule"`, "field", "spec"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
 		{
-			name: "self.status reference is rejected (assertMetadataOnly)",
+			name: "self.status reference is rejected",
 			rules: []ArchitectureRule{
 				{
 					Name:          "status-rule",
@@ -314,11 +316,12 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"amd64"},
 				},
 			},
-			expectError:   true,
-			errorContains: "disallowed field",
+			expectError:      true,
+			errorContains:    []string{`"status-rule"`, "field", "status"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
 		{
-			name: "self.spec.containers reference is rejected (assertMetadataOnly)",
+			name: "self.spec.containers reference is rejected",
 			rules: []ArchitectureRule{
 				{
 					Name:          "containers-rule",
@@ -326,8 +329,9 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"amd64"},
 				},
 			},
-			expectError:   true,
-			errorContains: "disallowed field",
+			expectError:      true,
+			errorContains:    []string{`"containers-rule"`, "field", "spec"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
 		{
 			name: "self.metadata reference is permitted (assertMetadataOnly)",
@@ -363,7 +367,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "has(self.spec.nodeName) is rejected (assertMetadataOnly)",
+			name: "has(self.spec.nodeName) is rejected",
 			rules: []ArchitectureRule{
 				{
 					Name:          "has-spec-rule",
@@ -371,8 +375,9 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"amd64"},
 				},
 			},
-			expectError:   true,
-			errorContains: "disallowed field",
+			expectError:      true,
+			errorContains:    []string{`"has-spec-rule"`, "field", "spec"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
 		{
 			name: "multiple rules; first valid, second spec reference rejected",
@@ -388,12 +393,13 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"ppc64le"},
 				},
 			},
-			expectError:   true,
-			errorContains: `"spec-rule"`,
+			expectError:      true,
+			errorContains:    []string{`"spec-rule"`, "field", "spec"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
-		// Regression: comprehension (exists) traverses self.spec.* — must be rejected
+		// Typed admission validation rejects comprehensions over self.spec.*.
 		{
-			name: "comprehension over self.spec.containers is rejected (assertMetadataOnly)",
+			name: "comprehension over self.spec.containers is rejected",
 			rules: []ArchitectureRule{
 				{
 					Name:          "exists-rule",
@@ -401,12 +407,13 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 					Architectures: []string{"amd64"},
 				},
 			},
-			expectError:   true,
-			errorContains: "disallowed field",
+			expectError:      true,
+			errorContains:    []string{`"exists-rule"`, "field", "spec"},
+			errorNotContains: []string{"references a disallowed field"},
 		},
-		// Regression: constant expression has no Select nodes — assertMetadataOnly must not reject it
+		// Constant expressions are allowed.
 		{
-			name: "constant expression true is permitted (assertMetadataOnly)",
+			name: "constant expression true is permitted",
 			rules: []ArchitectureRule{
 				{
 					Name:          "const-rule",
@@ -430,8 +437,17 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
-				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
-					t.Errorf("expected error to contain %q, got: %v", tt.errorContains, err)
+				} else {
+					for _, msg := range tt.errorContains {
+						if !strings.Contains(err.Error(), msg) {
+							t.Errorf("expected error to contain %q, got: %v", msg, err)
+						}
+					}
+					for _, msg := range tt.errorNotContains {
+						if strings.Contains(err.Error(), msg) {
+							t.Errorf("expected error not to contain %q, got: %v", msg, err)
+						}
+					}
 				}
 			} else {
 				if err != nil {
