@@ -200,6 +200,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				g.Expect(pod.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel))
 
 				// Verify ppc64le architecture constraint applied
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -319,6 +322,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 					}))
 
 					// Verify ppc64le architecture constraint applied (from fallback)
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 					g.Expect(terms).To(HaveLen(1))
 					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -398,6 +404,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
 					g.Expect(err).NotTo(HaveOccurred())
 
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 					g.Expect(terms).To(HaveLen(1))
 					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -458,6 +467,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithLabel), podWithLabel)
 				g.Expect(err).NotTo(HaveOccurred())
 
+				g.Expect(podWithLabel.Spec.Affinity).NotTo(BeNil())
+				g.Expect(podWithLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(podWithLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := podWithLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -483,6 +495,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithoutLabel), podWithoutLabel)
 				g.Expect(err).NotTo(HaveOccurred())
 
+				g.Expect(podWithoutLabel.Spec.Affinity).NotTo(BeNil())
+				g.Expect(podWithoutLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(podWithoutLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := podWithoutLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{

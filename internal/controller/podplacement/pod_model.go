@@ -557,8 +557,8 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 		return true
 	}
 
-	// Check plugin configuration
-	cppcPluginEnabled := cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)
+	// Check plugin configuration; guard against nil cppc (informer cache not yet populated)
+	cppcPluginEnabled := cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)
 	hasMatchingPPCWithPlugin := pod.hasMatchingPPCWithPlugin(matchingPPCs)
 
 	log.V(4).Info("shouldIgnorePod plugin check",

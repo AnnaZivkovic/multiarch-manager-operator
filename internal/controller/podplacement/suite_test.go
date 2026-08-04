@@ -352,7 +352,7 @@ func runManager() {
 	Expect(err).NotTo(HaveOccurred())
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{
 		Handler: NewPodSchedulingGateMutatingWebHook(
-			mgr.GetClient(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
+			mgr.GetClient(), mgr.GetAPIReader(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	})
 
 	policyConfig := []byte(`{"default":[{"type":"insecureAcceptAnything"}],"transports":{"atomic":{},"docker":{},"docker-daemon":{"":[{"type":"insecureAcceptAnything"}]}}}`)

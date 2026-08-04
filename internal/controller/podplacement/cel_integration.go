@@ -67,8 +67,16 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 			"architectures", result.architectures)
 	}
 
-	// Remove existing architecture constraints and apply new ones
-	applyArchitectureConstraints(pod.PodObject(), result.architectures)
+	// Remove existing architecture constraints and apply new ones.
+	// If no architectures were produced (empty/nil result), do not claim the plugin
+	// applied — fall through to image-based detection so the pod is not ungated
+	// without any architecture constraint.
+	if !applyArchitectureConstraints(pod.PodObject(), result.architectures) {
+		log.V(1).Info("CEL plugin produced no architectures; skipping",
+			"PodPlacementConfig", ppc.Name, "pod", pod.Name,
+			"fallbackArchitectures", result.architectures)
+		return false
+	}
 
 	// Publish event
 	configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)

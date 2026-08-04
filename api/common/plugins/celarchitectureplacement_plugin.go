@@ -23,6 +23,8 @@ import (
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 
+	apiservercel "k8s.io/apiserver/pkg/cel"
+
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -117,16 +119,82 @@ func (c *CelArchitecturePlacement) ValidateArchitectures() error {
 	return nil
 }
 
+// podValidationTypeProvider returns a DeclTypeProvider that models only the Pod
+// metadata fields permitted by the CEL allow-list. Using a typed provider lets
+// the CEL checker reject invalid field references (e.g. self.metadata.labells)
+// at admission time rather than silently returning null at runtime.
+//
+// The schema is intentionally minimal:
+//
+//	self → pod (object)
+//	    .metadata → pod.metadata (object)
+//	        .name            string
+//	        .namespace       string
+//	        .generateName    string
+//	        .labels          map<string,string>
+//	        .annotations     map<string,string>
+//
+// spec and status are NOT defined, so self.spec.* fails compile-time type
+// checking in addition to being rejected by assertMetadataOnly.
+func podValidationTypeProvider() (*apiservercel.DeclTypeProvider, error) {
+	strToStr := apiservercel.NewMapType(apiservercel.StringType, apiservercel.StringType, 0)
+
+	metadataFields := map[string]*apiservercel.DeclField{
+		"name":         apiservercel.NewDeclField("name", apiservercel.StringType, false, nil, nil),
+		"namespace":    apiservercel.NewDeclField("namespace", apiservercel.StringType, false, nil, nil),
+		"generateName": apiservercel.NewDeclField("generateName", apiservercel.StringType, false, nil, nil),
+		"labels":       apiservercel.NewDeclField("labels", strToStr, false, nil, nil),
+		"annotations":  apiservercel.NewDeclField("annotations", strToStr, false, nil, nil),
+	}
+	metadataType := apiservercel.NewObjectType("pod.metadata", metadataFields)
+
+	podFields := map[string]*apiservercel.DeclField{
+		"metadata": apiservercel.NewDeclField("metadata", metadataType, false, nil, nil),
+	}
+	podType := apiservercel.NewObjectType("pod", podFields)
+
+	tp := apiservercel.NewDeclTypeProvider(podType)
+	return tp, nil
+}
+
 // ValidateCELExpressions validates all CEL expressions in the plugin's rules
 // at admission time. Validation ensures:
 //  1. Each expression compiles without syntax errors.
 //  2. Each expression returns a boolean value.
-//  3. No expression references self.spec.* or self.status.* fields
-//     (assertMetadataOnly: only self.metadata.* is permitted).
+//  3. Invalid field references (e.g. self.metadata.labells) are rejected via
+//     Pod schema type checking using a typed CEL environment.
+//  4. No expression references self.spec.* or self.status.* fields
+//     (assertMetadataOnly: defense-in-depth, enforced after type checking).
+//
+// The typed environment binds 'self' to the pod object type (cel.ObjectType("pod"))
+// so that the CEL checker can statically verify field names against the known
+// Pod metadata schema. This satisfies enhancement MTO-0005 §"CEL Expression Validation"
+// item 3 ("Pod Schema Validation").
+//
+// The runtime evaluator (newCELEvaluator) intentionally uses cel.DynType and
+// evaluates against podToMap() data — it never validates schema and never
+// exposes spec/status.
 func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
-	env, err := cel.NewEnv(
-		cel.Variable("self", cel.DynType),
-	)
+	tp, err := podValidationTypeProvider()
+	if err != nil {
+		return fmt.Errorf("failed to create pod type provider: %w", err)
+	}
+
+	// Build a base environment to obtain its type provider, which is required
+	// by DeclTypeProvider.EnvOptions to compose typed and built-in types.
+	baseEnv, err := cel.NewEnv()
+	if err != nil {
+		return fmt.Errorf("failed to create base CEL environment: %w", err)
+	}
+
+	envOpts, err := tp.EnvOptions(baseEnv.CELTypeProvider())
+	if err != nil {
+		return fmt.Errorf("failed to build CEL environment options from type provider: %w", err)
+	}
+
+	envOpts = append(envOpts, cel.Variable("self", cel.ObjectType("pod")))
+
+	env, err := cel.NewEnv(envOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create CEL environment: %w", err)
 	}
@@ -139,8 +207,9 @@ func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
 		if ast.OutputType() != cel.BoolType {
 			return fmt.Errorf("invalid CEL expression in rule %q: CEL expression must return a boolean, got %v", rule.Name, ast.OutputType())
 		}
-		// Enforce metadata-only field allow-list: reject any reference to self.spec.*
-		// or self.status.* so that expressions cannot read sensitive workload data.
+		// Defense-in-depth: assertMetadataOnly walks the AST to reject any
+		// self.spec.* or self.status.* path that the typed environment
+		// (which only defines self.metadata.*) might have somehow admitted.
 		if err := assertMetadataOnly(ast, rule.Name); err != nil {
 			return err
 		}

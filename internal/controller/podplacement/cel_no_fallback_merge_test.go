@@ -223,6 +223,9 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 					Name: utils.SchedulingGateName,
 				}))
 
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 
@@ -299,6 +302,9 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 					Name: utils.SchedulingGateName,
 				}))
 
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 

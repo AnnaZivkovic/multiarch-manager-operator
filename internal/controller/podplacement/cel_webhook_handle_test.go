@@ -90,7 +90,8 @@ func newHandleWebhook(t *testing.T) *PodSchedulingGateMutatingWebHook {
 	}
 	// clientSet nil is safe: the async delayedSchedulingGatedEvent goroutine will
 	// no-op because the pool submit will error immediately.
-	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, s, record.NewFakeRecorder(32), pool)
+	// apiReader nil is safe: the webhook falls back to the informer-backed client only when apiReader != nil.
+	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, s, record.NewFakeRecorder(32), pool)
 }
 
 // TestHandleAdmission_ResponseAllowed verifies that Handle() returns

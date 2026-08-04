@@ -269,7 +269,7 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		ants.Release()
 	})
-	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
+	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 }

@@ -95,10 +95,10 @@ func applyArchitectureNodeAffinity(pod *corev1.Pod, architectures []string) {
 // This ensures the plugin's architecture selection takes full effect while avoiding
 // Kubernetes API rejections for NodeSelectorTerms modifications.
 //
-// Returns true to indicate that architecture constraints were applied. The return value
-// is used by tests to verify the function was called, but production callers (webhook
-// and controller) ignore the return value since they always proceed with pod processing
-// after calling this function.
+// Returns true if constraints were applied (architectures non-empty), false otherwise.
+// Callers use the return value to decide whether this PPC "claimed" the pod: a false
+// result means no architectures were produced and the caller should continue to the
+// next PPC rather than treating this one as the first-match winner.
 func applyArchitectureConstraints(pod *corev1.Pod, architectures []string) bool {
 	if len(architectures) == 0 {
 		return false

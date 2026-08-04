@@ -211,6 +211,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 
 				// applyArchitectureConstraints updates in-place: arch is replaced within the
 				// original single term, so zone and the new arch coexist in the same term.
+				// Guard nil affinity explicitly so gomega records an assertion failure
+				// (not a panic) when arch was not yet applied.
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 
@@ -289,6 +294,9 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				g.Expect(pod.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel))
 
 				// Verify fallback architectures applied
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -354,6 +362,9 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				}))
 
 				// Verify s390x architecture applied (from CEL, not image inspection)
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -414,6 +425,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				}))
 
 				// Verify required affinity from CEL
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
 				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).NotTo(BeEmpty())
@@ -509,6 +522,9 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				}))
 
 				// Verify ppc64le architecture applied (from high priority config)
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 				g.Expect(terms).To(HaveLen(1))
 				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
@@ -562,13 +578,18 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 			err = k8sClient.Create(ctx, pod)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for initial reconciliation")
+			By("Waiting for initial reconciliation - gate removed AND architecture affinity set")
 			Eventually(func(g Gomega) {
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
 				}))
+				// Also verify the CEL plugin set the architecture affinity before
+				// we capture the initial state for the stability comparison below.
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
 			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 
 			By("Capturing initial state")

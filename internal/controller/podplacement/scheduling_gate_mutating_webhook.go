@@ -49,6 +49,7 @@ import (
 // PodSchedulingGateMutatingWebHook annotates Pods
 type PodSchedulingGateMutatingWebHook struct {
 	client     client.Client
+	apiReader  client.Reader
 	clientSet  *kubernetes.Clientset
 	decoder    admission.Decoder
 	once       sync.Once
@@ -84,12 +85,24 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
 
-	// List existing PodPlacementConfigs in the same namespace
+	// List existing PodPlacementConfigs in the same namespace.
+	// Use the informer-backed client first. If the cache has not yet observed a
+	// newly-created PodPlacementConfig, fall back to a direct API read so the
+	// webhook can apply CEL architecture constraints before the Pod is persisted.
+	// This avoids missing CEL placement decisions during informer startup or cache
+	// propagation, when later reconciliation cannot reliably add new required
+	// NodeSelectorTerms.
 	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
 	if err := a.client.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
 		log.Error(err, "Failed to list existing PodPlacementConfigs in namespace")
 		// On error, proceed without PPC filtering - fail open
 		ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
+	}
+	if len(ppcList.Items) == 0 && a.apiReader != nil {
+		if err := a.apiReader.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+			log.Error(err, "Failed to list PodPlacementConfigs from API server (webhook fallback)")
+			ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
+		}
 	}
 
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
@@ -201,7 +214,7 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 			// Should not occur: webhook validation ensures the plugin is non-nil when enabled.
 			log.V(1).Info("CEL plugin enabled but configuration is nil; skipping",
 				"PodPlacementConfig", ppc.Name, "pod", pod.Name)
-			return
+			continue
 		}
 
 		// Evaluate CEL rules against the pod
@@ -212,8 +225,18 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 			continue
 		}
 
-		// Apply architecture constraints (removes existing constraints and sets new ones)
-		applyArchitectureConstraints(pod.PodObject(), result.architectures)
+		// Apply architecture constraints (removes existing constraints and sets new ones).
+		// If no architectures were produced (empty/nil result), do not treat this PPC as
+		// having handled the pod — continue to the next PPC so that a lower-priority PPC
+		// can still contribute constraints. This mirrors the controller behavior in
+		// applyCELArchitecturePlacement, which returns false when architectures is empty.
+		if !applyArchitectureConstraints(pod.PodObject(), result.architectures) {
+			log.V(1).Info("CEL plugin produced no architectures; trying next PPC",
+				"pod", pod.Name,
+				"PodPlacementConfig", ppc.Name)
+			continue
+		}
+
 		log.V(1).Info("Applied CEL architecture constraints",
 			"pod", pod.Name,
 			"PodPlacementConfig", ppc.Name,
@@ -221,15 +244,16 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 			"ruleMatched", result.matched,
 			"ruleName", result.ruleName)
 
-		// First matching PPC wins - stop processing remaining PPCs
+		// First PPC that produces architectures wins - stop processing remaining PPCs
 		return
 	}
 }
 
-func NewPodSchedulingGateMutatingWebHook(client client.Client, clientSet *kubernetes.Clientset,
+func NewPodSchedulingGateMutatingWebHook(client client.Client, apiReader client.Reader, clientSet *kubernetes.Clientset,
 	scheme *runtime.Scheme, recorder record.EventRecorder, workerPool *ants.MultiPool) *PodSchedulingGateMutatingWebHook {
 	a := &PodSchedulingGateMutatingWebHook{
 		client:     client,
+		apiReader:  apiReader,
 		clientSet:  clientSet,
 		scheme:     scheme,
 		recorder:   recorder,
