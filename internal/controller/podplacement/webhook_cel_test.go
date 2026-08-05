@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -295,7 +295,7 @@ func TestApplyCELInWebhook_MalformedPPCDoesNotBlockLowerPriority(t *testing.T) {
 	}
 }
 
-// TestApplyCELInWebhook_RespectsP PCPriority verifies that applyCELInWebhook
+// TestApplyCELInWebhook_RespectsPPCPriority verifies that applyCELInWebhook
 // correctly sorts PPCs by priority and applies only the highest priority PPC
 // with CEL plugin enabled.
 func TestApplyCELInWebhook_RespectsPPCPriority(t *testing.T) {

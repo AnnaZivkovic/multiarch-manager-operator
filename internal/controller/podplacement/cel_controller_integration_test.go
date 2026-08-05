@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,59 +27,33 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 var _ = Describe("CEL Architecture Placement Controller Integration", func() {
+	// timeout / interval are shared constants; they carry no mutable state.
 	const (
-		testNamespace = "cel-test-namespace"
-		timeout       = e2e.WaitShort
-		interval      = time.Millisecond * 250
+		timeout  = e2e.WaitShort
+		interval = time.Millisecond * 250
 	)
 
+	// ns is re-created as a uniquely-named, ephemeral namespace for every It
+	// block. DeferCleanup inside newEphemeralTestNamespace() guarantees cleanup
+	// even when a spec fails or panics.
+	var ns *corev1.Namespace
+
 	BeforeEach(func() {
-		// Create test namespace
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNamespace,
-			},
-		}
-		err := k8sClient.Create(ctx, ns)
-		if err != nil {
-			// Namespace might already exist from previous test
-			Expect(crclient.IgnoreAlreadyExists(err)).NotTo(HaveOccurred())
-		}
-	})
-
-	AfterEach(func() {
-		// Clean up PodPlacementConfigs
-		ppcList := &v1beta1.PodPlacementConfigList{}
-		err := k8sClient.List(ctx, ppcList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range ppcList.Items {
-			err := k8sClient.Delete(ctx, &ppcList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
-
-		// Clean up pods
-		podList := &corev1.PodList{}
-		err = k8sClient.List(ctx, podList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range podList.Items {
-			err := k8sClient.Delete(ctx, &podList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
+		ns = newEphemeralTestNamespace()
 	})
 
 	Context("Full Reconciliation Flow", func() {
 		It("should remove existing architecture constraints and apply new ones based on CEL rule", func() {
 			By("Creating a PodPlacementConfig with CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-test-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-config-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "test",
@@ -102,25 +76,22 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod with existing architecture constraint that matches the CEL rule")
 			pod := NewPod().
-				WithName("test-pod-database").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "test", "component", "database").
 				WithNodeSelectors(utils.ArchLabel, utils.ArchitectureAmd64). // Existing constraint
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation to complete")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				// Verify scheduling gate removed
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
@@ -148,8 +119,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should preserve non-architecture affinity constraints", func() {
 			By("Creating a PodPlacementConfig with CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-preserve-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-preserve-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "preserve-test",
@@ -172,13 +143,12 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod with zone affinity and architecture constraint")
 			pod := NewPod().
-				WithName("test-pod-preserve").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-preserve-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "preserve-test").
 				WithNodeSelectorTermsMatchExpressions(
 					[]corev1.NodeSelectorRequirement{
@@ -197,13 +167,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation and verifying zone constraint preserved")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -242,8 +210,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should apply fallback architectures when no CEL rules match", func() {
 			By("Creating a PodPlacementConfig with fallback architectures")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-fallback-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-fallback-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "fallback-test",
@@ -266,25 +234,22 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod that doesn't match any rules")
 			pod := NewPod().
-				WithName("test-pod-fallback").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-fallback-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "fallback-test").
 				WithNodeSelectors(utils.ArchLabel, utils.ArchitectureS390x). // Existing constraint
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation and verifying fallback architectures applied")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -312,8 +277,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should apply CEL plugin before image inspection", func() {
 			By("Creating a PodPlacementConfig with CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-precedence-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-precedence-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "precedence-test",
@@ -336,26 +301,23 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod with a multi-arch image")
 			// Image inspection would normally detect multiple architectures,
 			// but CEL plugin should take precedence
 			pod := NewPod().
-				WithName("test-pod-precedence").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-precedence-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "precedence-test").
 				WithContainersImages("quay.io/test/multiarch:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation and verifying CEL plugin took precedence")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -380,8 +342,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should preserve preferred affinity from NodeAffinityScoring plugin", func() {
 			By("Creating a PodPlacementConfig with both plugins")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-coexist-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-coexist-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "coexist-test",
@@ -401,24 +363,21 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Rules:                 []plugins.ArchitectureRule{},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod")
 			pod := NewPod().
-				WithName("test-pod-coexist").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-coexist-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "coexist-test").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation and verifying both plugins applied")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -443,8 +402,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should evaluate highest priority PodPlacementConfig first", func() {
 			By("Creating a low priority PodPlacementConfig")
 			ppcLow := NewPodPlacementConfig().
-				WithName("cel-low-priority").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-low-priority-").
+				WithNamespace(ns.Name).
 				WithPriority(10).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -468,13 +427,12 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppcLow)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppcLow)).To(Succeed())
 
 			By("Creating a high priority PodPlacementConfig")
 			ppcHigh := NewPodPlacementConfig().
-				WithName("cel-high-priority").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-high-priority-").
+				WithNamespace(ns.Name).
 				WithPriority(100).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
@@ -498,24 +456,34 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err = k8sClient.Create(ctx, ppcHigh)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppcHigh)).To(Succeed())
+
+			// Wait until the high-priority PPC is visible to the API server before
+			// creating the Pod. The webhook uses mgr.GetClient() (an informer-backed
+			// cache). If the cache hasn't yet observed ppcHigh when the Pod is
+			// admitted, it will see only ppcLow and apply arm64 instead of ppc64le,
+			// permanently removing the scheduling gate with the wrong architecture.
+			// Polling the direct k8sClient (non-cached) is sufficient: once the
+			// object is stable in etcd the manager informer converges within one
+			// resync cycle, well before the webhook fires for the pod below.
+			By("Waiting until the high-priority PodPlacementConfig is observable")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(ppcHigh), ppcHigh)).To(Succeed())
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 
 			By("Creating a pod that matches both configs")
 			pod := NewPod().
-				WithName("test-pod-priority").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-priority-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "priority-test").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation and verifying high priority config applied")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -540,8 +508,8 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		It("should remain stable across multiple reconciliations", func() {
 			By("Creating a PodPlacementConfig")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-stability-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-stability-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "stability-test",
@@ -564,24 +532,21 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod")
 			pod := NewPod().
-				WithName("test-pod-stability").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-stability-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "stability-test").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for initial reconciliation - gate removed AND architecture affinity set")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
 				}))
@@ -593,28 +558,38 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 
 			By("Capturing initial state")
-			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 			initialTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
 			initialResourceVersion := pod.ResourceVersion
 
-			By("Triggering additional reconciliations by updating pod labels")
+			By("Triggering first reconciliation by updating pod labels")
+			Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 			pod.Labels["trigger-reconcile"] = "1"
-			err = k8sClient.Update(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Update(ctx, pod)).To(Succeed())
 
-			time.Sleep(time.Second) // Allow reconciliation
+			// Wait for the controller to observe and process the first label update
+			// before issuing the second one, using Eventually instead of time.Sleep.
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+				g.Expect(pod.Labels["trigger-reconcile"]).To(Equal("1"))
+				// Affinity must still be intact after the first re-reconciliation.
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 
+			By("Triggering second reconciliation by updating pod labels")
+			Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 			pod.Labels["trigger-reconcile"] = "2"
-			err = k8sClient.Update(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Update(ctx, pod)).To(Succeed())
 
-			time.Sleep(time.Second) // Allow reconciliation
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+				g.Expect(pod.Labels["trigger-reconcile"]).To(Equal("2"))
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 
 			By("Verifying pod state remains stable")
-			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 			finalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
 			Expect(finalTermCount).To(Equal(initialTermCount), "term count should not change")

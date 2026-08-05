@@ -21,6 +21,12 @@ func (p *PodPlacementConfigBuilder) WithName(name string) *PodPlacementConfigBui
 	return p
 }
 
+func (p *PodPlacementConfigBuilder) WithGenerateName(prefix string) *PodPlacementConfigBuilder {
+	p.GenerateName = prefix
+	p.Name = "" // Name must be empty when GenerateName is set
+	return p
+}
+
 func (p *PodPlacementConfigBuilder) WithNamespace(namespace string) *PodPlacementConfigBuilder {
 	p.Namespace = namespace
 	return p

@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,11 +30,10 @@ import (
 var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence", func() {
 	Context("When both plugins are enabled in the same PodPlacementConfig", func() {
 		It("should apply CEL architecture constraints AND NodeAffinityScoring preferences", func() {
-			// Create a pod
+			// Create an in-memory pod (never persisted to the API server).
+			// Name and Namespace are irrelevant for these pure in-memory assertions.
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
 					Labels: map[string]string{
 						"app": "test",
 					},
@@ -117,12 +116,10 @@ var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence
 		})
 
 		It("should preserve CEL required affinity when NodeAffinityScoring adds preferred affinity", func() {
-			// Create a pod with existing required affinity from CEL
+			// Create an in-memory pod (never persisted to the API server).
+			// Name and Namespace are irrelevant for these pure in-memory assertions.
 			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod-2",
-					Namespace: "default",
-				},
+				ObjectMeta: metav1.ObjectMeta{},
 				Spec: corev1.PodSpec{
 					Affinity: &corev1.Affinity{
 						NodeAffinity: &corev1.NodeAffinity{

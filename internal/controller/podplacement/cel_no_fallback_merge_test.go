@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -35,51 +34,25 @@ import (
 
 var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", func() {
 	const (
-		testNamespace = "cel-no-merge-test-namespace"
-		timeout       = e2e.WaitShort
-		interval      = time.Millisecond * 250
+		timeout  = e2e.WaitShort
+		interval = time.Millisecond * 250
 	)
 
+	// ns is re-created as a uniquely-named, ephemeral namespace for every It
+	// block. DeferCleanup inside newEphemeralTestNamespace() guarantees cleanup
+	// even when a spec fails or panics.
+	var ns *corev1.Namespace
+
 	BeforeEach(func() {
-		// Create test namespace
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNamespace,
-			},
-		}
-		err := k8sClient.Create(ctx, ns)
-		if err != nil {
-			// Namespace might already exist from previous test
-			Expect(crclient.IgnoreAlreadyExists(err)).NotTo(HaveOccurred())
-		}
-	})
-
-	AfterEach(func() {
-		// Clean up PodPlacementConfigs
-		ppcList := &v1beta1.PodPlacementConfigList{}
-		err := k8sClient.List(ctx, ppcList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range ppcList.Items {
-			err := k8sClient.Delete(ctx, &ppcList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
-
-		// Clean up pods
-		podList := &corev1.PodList{}
-		err = k8sClient.List(ctx, podList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range podList.Items {
-			err := k8sClient.Delete(ctx, &podList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
+		ns = newEphemeralTestNamespace()
 	})
 
 	Context("Early Return After CEL Match", func() {
 		It("should contain ONLY matched rule architectures without merging fallback or image-detected architectures", func() {
 			By("Creating a PodPlacementConfig with CEL rule matching to ppc64le only")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-no-merge-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-no-merge-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "test",
@@ -111,24 +84,21 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod that matches the CEL rule")
 			pod := NewPod().
-				WithName("test-pod-database").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-db-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "test", "component", "database").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Waiting for reconciliation to complete")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				// Verify scheduling gate removed
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
@@ -172,8 +142,8 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 		It("should not execute image-based detection when CEL rule matches", func() {
 			By("Creating a PodPlacementConfig with CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-skip-image-detection").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-skip-img-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "skip-image-test",
@@ -198,26 +168,23 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod with a multi-arch image")
 			// Even if image inspection would detect multiple architectures,
 			// CEL plugin should take precedence and return early
 			pod := NewPod().
-				WithName("test-pod-multiarch").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-multiarch-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "skip-image-test").
 				WithContainersImages("quay.io/test/multiarch:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Verifying ONLY arm64 is applied (CEL rule), not image-detected architectures")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,
@@ -253,8 +220,8 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 
 			By("Creating a PodPlacementConfig with CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("cel-no-cppc-fallback").
-				WithNamespace(testNamespace).
+				WithGenerateName("cel-no-cppc-fb-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"app": "no-cppc-fallback",
@@ -279,24 +246,21 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod")
 			pod := NewPod().
-				WithName("test-pod-s390x").
-				WithNamespace(testNamespace).
+				WithGenerateName("test-pod-s390x-").
+				WithNamespace(ns.Name).
 				WithLabels("app", "no-cppc-fallback").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Verifying ONLY s390x is applied, no CPPC fallback merged")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
 					Name: utils.SchedulingGateName,

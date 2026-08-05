@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -35,51 +34,25 @@ import (
 
 var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 	const (
-		testNamespace = "cel-ppc64le-test-namespace"
-		timeout       = e2e.WaitShort
-		interval      = time.Millisecond * 250
+		timeout  = e2e.WaitShort
+		interval = time.Millisecond * 250
 	)
 
+	// ns is re-created as a uniquely-named, ephemeral namespace for every It
+	// block. DeferCleanup inside newEphemeralTestNamespace() guarantees cleanup
+	// even when a spec fails or panics.
+	var ns *corev1.Namespace
+
 	BeforeEach(func() {
-		// Create test namespace
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNamespace,
-			},
-		}
-		err := k8sClient.Create(ctx, ns)
-		if err != nil {
-			// Namespace might already exist from previous test
-			Expect(crclient.IgnoreAlreadyExists(err)).NotTo(HaveOccurred())
-		}
-	})
-
-	AfterEach(func() {
-		// Clean up PodPlacementConfigs
-		ppcList := &v1beta1.PodPlacementConfigList{}
-		err := k8sClient.List(ctx, ppcList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range ppcList.Items {
-			err := k8sClient.Delete(ctx, &ppcList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
-
-		// Clean up pods
-		podList := &corev1.PodList{}
-		err = k8sClient.List(ctx, podList, crclient.InNamespace(testNamespace))
-		Expect(err).NotTo(HaveOccurred())
-		for i := range podList.Items {
-			err := k8sClient.Delete(ctx, &podList.Items[i])
-			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		}
+		ns = newEphemeralTestNamespace()
 	})
 
 	Context("Default PPC64LE Behavior", func() {
 		It("should default all pods to ppc64le without any special CEL rules", func() {
 			By("Creating a PodPlacementConfig with ppc64le as fallback architecture and no rules")
 			ppc := NewPodPlacementConfig().
-				WithName("default-ppc64le-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("default-ppc64le-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"managed": "true",
@@ -98,8 +71,7 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				Rules:                 []plugins.ArchitectureRule{}, // No rules - all pods use fallback
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating multiple pods with different names - all should default to ppc64le")
 			testPods := []struct {
@@ -116,7 +88,7 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				By("Creating pod: " + testPod.name)
 				pod := NewPod().
 					WithName(testPod.name).
-					WithNamespace(testNamespace).
+					WithNamespace(ns.Name).
 					WithLabels("managed", "true").
 					WithContainersImages("quay.io/test/image:latest").
 					Build()
@@ -126,13 +98,11 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 					pod.Labels[k] = v
 				}
 
-				err = k8sClient.Create(ctx, pod)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 				By("Verifying pod " + testPod.name + " defaults to ppc64le")
 				Eventually(func(g Gomega) {
-					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 					// Verify scheduling gate removed
 					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
@@ -158,8 +128,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 		It("should override existing architecture constraints with ppc64le default", func() {
 			By("Creating a PodPlacementConfig with ppc64le fallback")
 			ppc := NewPodPlacementConfig().
-				WithName("override-ppc64le-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("override-ppc64le-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"managed": "true",
@@ -176,25 +146,22 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				Rules:                 []plugins.ArchitectureRule{},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating a pod with existing amd64 constraint")
 			pod := NewPod().
-				WithName("pod-with-amd64").
-				WithNamespace(testNamespace).
+				WithGenerateName("pod-with-amd64-").
+				WithNamespace(ns.Name).
 				WithLabels("managed", "true").
 				WithNodeSelectors(utils.ArchLabel, utils.ArchitectureAmd64). // Existing amd64 constraint
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 			By("Verifying existing amd64 constraint is replaced with ppc64le")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 				// Verify old nodeSelector constraint removed
 				g.Expect(pod.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel))
@@ -218,8 +185,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 		It("should pin pods with 'wkc-' prefix to specific architecture by inspecting metadata.name", func() {
 			By("Creating a PodPlacementConfig with CEL rule to match wkc- prefix")
 			ppc := NewPodPlacementConfig().
-				WithName("wkc-prefix-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("wkc-prefix-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"managed": "true",
@@ -228,7 +195,11 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				WithPlugins().
 				Build()
 
-			// Configure CEL plugin with rule to match wkc- prefix in pod name
+			// Configure CEL plugin with rule to match wkc- prefix in pod name.
+			// NOTE: pod names are meaningful here — the CEL expression evaluates
+			// self.metadata.name at admission time, so the exact name matters.
+			// Each pod is isolated within the ephemeral namespace, so name
+			// uniqueness across parallel workers is guaranteed by namespace isolation.
 			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
 				BasePlugin: plugins.BasePlugin{
 					Enabled: true,
@@ -244,8 +215,7 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating pods with wkc- prefix - should be pinned to amd64")
 			wkcPods := []string{
@@ -259,18 +229,16 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				By("Creating wkc- pod: " + podName)
 				pod := NewPod().
 					WithName(podName).
-					WithNamespace(testNamespace).
+					WithNamespace(ns.Name).
 					WithLabels("managed", "true").
 					WithContainersImages("quay.io/test/image:latest").
 					Build()
 
-				err = k8sClient.Create(ctx, pod)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 				By("Verifying " + podName + " is pinned to amd64")
 				Eventually(func(g Gomega) {
-					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 					// Verify scheduling gate removed
 					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
@@ -303,18 +271,16 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				By("Creating non-wkc pod: " + podName)
 				pod := NewPod().
 					WithName(podName).
-					WithNamespace(testNamespace).
+					WithNamespace(ns.Name).
 					WithLabels("managed", "true").
 					WithContainersImages("quay.io/test/image:latest").
 					Build()
 
-				err = k8sClient.Create(ctx, pod)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 				By("Verifying " + podName + " defaults to ppc64le")
 				Eventually(func(g Gomega) {
-					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 					// Verify scheduling gate removed
 					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
@@ -339,8 +305,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 		It("should support multiple metadata-based rules with priority ordering", func() {
 			By("Creating a PodPlacementConfig with multiple prefix rules")
 			ppc := NewPodPlacementConfig().
-				WithName("multi-prefix-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("multi-prefix-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"managed": "true",
@@ -374,8 +340,7 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			testCases := []struct {
 				podName              string
@@ -391,18 +356,16 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				By("Creating pod: " + tc.podName)
 				pod := NewPod().
 					WithName(tc.podName).
-					WithNamespace(testNamespace).
+					WithNamespace(ns.Name).
 					WithLabels("managed", "true").
 					WithContainersImages("quay.io/test/image:latest").
 					Build()
 
-				err = k8sClient.Create(ctx, pod)
-				Expect(err).NotTo(HaveOccurred())
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 				By("Verifying " + tc.podName + " is pinned to " + tc.expectedArchitecture)
 				Eventually(func(g Gomega) {
-					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
 
 					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
 					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
@@ -421,8 +384,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 		It("should inspect metadata labels in addition to name", func() {
 			By("Creating a PodPlacementConfig with label-based CEL rule")
 			ppc := NewPodPlacementConfig().
-				WithName("wkc-label-config").
-				WithNamespace(testNamespace).
+				WithGenerateName("wkc-label-").
+				WithNamespace(ns.Name).
 				WithLabelSelector(&metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"managed": "true",
@@ -448,24 +411,21 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				},
 			}
 
-			err := k8sClient.Create(ctx, ppc)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 			By("Creating pod with wkc-component label")
 			podWithLabel := NewPod().
-				WithName("service-with-wkc-label").
-				WithNamespace(testNamespace).
+				WithGenerateName("svc-with-wkc-lbl-").
+				WithNamespace(ns.Name).
 				WithLabels("managed", "true", "wkc-component", "true").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, podWithLabel)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, podWithLabel)).To(Succeed())
 
 			By("Verifying pod with wkc-component label is pinned to amd64")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithLabel), podWithLabel)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithLabel), podWithLabel)).To(Succeed())
 
 				g.Expect(podWithLabel.Spec.Affinity).NotTo(BeNil())
 				g.Expect(podWithLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())
@@ -481,19 +441,17 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 
 			By("Creating pod without wkc-component label")
 			podWithoutLabel := NewPod().
-				WithName("service-without-wkc-label").
-				WithNamespace(testNamespace).
+				WithGenerateName("svc-no-wkc-lbl-").
+				WithNamespace(ns.Name).
 				WithLabels("managed", "true").
 				WithContainersImages("quay.io/test/image:latest").
 				Build()
 
-			err = k8sClient.Create(ctx, podWithoutLabel)
-			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Create(ctx, podWithoutLabel)).To(Succeed())
 
 			By("Verifying pod without wkc-component label defaults to ppc64le")
 			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithoutLabel), podWithoutLabel)
-				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithoutLabel), podWithoutLabel)).To(Succeed())
 
 				g.Expect(podWithoutLabel.Spec.Affinity).NotTo(BeNil())
 				g.Expect(podWithoutLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())

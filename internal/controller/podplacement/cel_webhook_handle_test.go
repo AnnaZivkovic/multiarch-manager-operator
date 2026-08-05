@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -98,7 +98,7 @@ func newHandleWebhook(t *testing.T) *PodSchedulingGateMutatingWebHook {
 // Allowed=true for a plain pod.
 func TestHandleAdmission_ResponseAllowed(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
 	}
 	wh := newHandleWebhook(t)
@@ -113,7 +113,7 @@ func TestHandleAdmission_ResponseAllowed(t *testing.T) {
 // patch contains an operation that adds the scheduling gate.
 func TestHandleAdmission_SchedulingGatePatchPresent(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
 	}
 	wh := newHandleWebhook(t)
@@ -139,7 +139,7 @@ func TestHandleAdmission_SchedulingGatePatchPresent(t *testing.T) {
 // marking the pod as gated is included in the patch.
 func TestHandleAdmission_SchedulingGateLabelPatchPresent(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
 		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
 	}
 	wh := newHandleWebhook(t)
@@ -180,7 +180,7 @@ func TestHandleAdmission_SchedulingGateLabelPatchPresent(t *testing.T) {
 // already bound to a node (spec.nodeName set) are not gated.
 func TestHandleAdmission_PodWithNodeName_GateNotAdded(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "bound-pod", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "bound-pod", Namespace: "test-wh"},
 		Spec: corev1.PodSpec{
 			NodeName:   "worker-1",
 			Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
@@ -201,7 +201,7 @@ func TestHandleAdmission_PodWithNodeName_GateNotAdded(t *testing.T) {
 
 // TestHandleAdmission_BadRawInput_ReturnsBadRequest verifies that Handle()
 // returns an Errored (not Allowed) response when the raw object bytes cannot
-// be decoded as a Pod.
+// be decoded as a Pod.  (namespace irrelevant — decode fails before gate check)
 func TestHandleAdmission_BadRawInput_ReturnsBadRequest(t *testing.T) {
 	wh := newHandleWebhook(t)
 	resp := wh.Handle(context.Background(), admission.Request{
@@ -223,7 +223,7 @@ func TestHandleAdmission_BadRawInput_ReturnsBadRequest(t *testing.T) {
 // gate (e.g. a retry or re-created pod).  No duplicate gate must be added.
 func TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate(t *testing.T) {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "test-wh"},
 		Spec: corev1.PodSpec{
 			SchedulingGates: []corev1.PodSchedulingGate{{Name: utils.SchedulingGateName}},
 			Containers:      []corev1.Container{{Name: "c", Image: "nginx:latest"}},
@@ -286,7 +286,7 @@ func TestHandleAdmission_CELAppliedViaApplyCELInWebhook(t *testing.T) {
 	raw := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-pod",
-			Namespace: "default",
+			Namespace: "test-wh",
 			Labels:    map[string]string{"app": "myapp"},
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},

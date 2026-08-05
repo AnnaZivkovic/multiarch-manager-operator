@@ -1,5 +1,5 @@
 /*
-Copyright 2026 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package podplacement
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/google/cel-go/cel"
@@ -160,6 +161,15 @@ func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error
 		"self": podMap,
 	})
 	if err != nil {
+		// With DynType, accessing a field that is absent in the underlying
+		// map produces a "no such key" runtime error rather than a static
+		// type error.  Treat these as a non-match (false) rather than a
+		// hard error so that expressions like
+		//   self.metadata.nonexistent == 'value'
+		// gracefully evaluate to false instead of blocking pod admission.
+		if strings.Contains(err.Error(), "no such key") {
+			return false, nil
+		}
 		return false, fmt.Errorf("CEL evaluation error: %w", err)
 	}
 
