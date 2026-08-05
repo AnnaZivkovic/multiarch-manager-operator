@@ -25,6 +25,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -763,6 +764,42 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		_ = r.ClientSet.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, utils.PodMutatingWebhookConfigurationName, metav1.DeleteOptions{})
 	}
 
+	// Defer enoexec DaemonSet until SA imagePullSecrets are provisioned by the OpenShift SA controller.
+	// This avoids a race condition where DaemonSet pods start immediately on all nodes before the SA's
+	// dockercfg secret exists, causing FailedToRetrieveImagePullSecret errors.
+	// Once the DaemonSet already exists, the SA check is skipped because the readiness gate only
+	// matters for initial creation.
+	// NOTE: The enoexec handler Deployment has a similar (but less severe) race — it is still applied
+	// in the same batch as its ServiceAccount without waiting for imagePullSecrets. This is acceptable
+	// because Deployments retry pod creation, whereas DaemonSet pods start on every node immediately.
+	// A follow-up could gate the Deployment the same way using the shared isEnoexecDaemonSetSAReady helper.
+	daemonSetDeferred := false
+	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
+		logVerbosityLevel := clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()
+		includeDaemonSet := false
+		ds := &appsv1.DaemonSet{}
+		if err := r.Get(ctx, client.ObjectKey{Name: utils.EnoexecDaemonSet, Namespace: utils.Namespace()}, ds); err == nil {
+			// DaemonSet already exists; always include it so ApplyResources keeps it in sync.
+			includeDaemonSet = true
+		} else if !apierrors.IsNotFound(err) {
+			return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+		} else {
+			// DaemonSet does not exist yet; only create it once SA imagePullSecrets are provisioned.
+			saReady, err := r.isEnoexecDaemonSetSAReady(ctx)
+			if err != nil {
+				return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+			}
+			includeDaemonSet = saReady
+			if !saReady {
+				daemonSetDeferred = true
+				log.V(1).Info("Deferring enoexec DaemonSet creation: SA imagePullSecrets not yet provisioned")
+			}
+		}
+		if includeDaemonSet {
+			objects = append(objects, buildDaemonSetENoExecEvent(utils.EnoexecDaemonSet, utils.EnoexecDaemonSet, logVerbosityLevel))
+		}
+	}
+
 	// If the servicemonitors.monitoring.coreos.com CRD is available, we create the ServiceMonitor objects
 	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
 		log.V(1).Info("Creating ServiceMonitors")
@@ -789,6 +826,16 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 	if err := utils.ApplyResources(ctx, r.ClientSet, r.DynamicClient, r.Recorder, objects); err != nil {
 		log.Error(err, "Unable to apply resources")
 		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+	}
+
+	if daemonSetDeferred {
+		// Status does not track enoexec DaemonSet readiness, so updateStatus alone
+		// will not requeue once pod-placement deps are Ready. Keep retrying until
+		// SA imagePullSecrets are provisioned (Owns(SA) may also wake us sooner).
+		if err := r.updateStatus(ctx, clusterPodPlacementConfig); err != nil {
+			return err
+		}
+		return newRequeueAfterError(5*time.Second, "waiting for enoexec SA imagePullSecrets before creating DaemonSet")
 	}
 
 	return r.updateStatus(ctx, clusterPodPlacementConfig)
@@ -874,8 +921,8 @@ func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clu
 	return objects, nil
 }
 
-// buildENoExecEventObjects if the ExecFormatErrorMonitor plugin is enabled create the deployment to start the controller
-// if it does not already exist
+// buildENoExecEventObjects builds the ENoExecEvent plugin resources (ServiceAccounts, RBAC, Deployment, ServiceMonitors)
+// excluding the DaemonSet, which is conditionally appended in reconcile() based on SA readiness.
 func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) ([]client.Object, error) {
 	log := ctrllog.FromContext(ctx)
 	logVerbosityLevel := clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()
@@ -953,8 +1000,8 @@ func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx conte
 			},
 		),
 		buildDeploymentENoExecEventHandler(logVerbosityLevel),
-		buildDaemonSetENoExecEvent(utils.EnoexecDaemonSet, utils.EnoexecDaemonSet, logVerbosityLevel),
 	}
+
 	// If the servicemonitors.monitoring.coreos.com CRD is available, we create the ServiceMonitor objects
 	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
 		log.V(1).Info("Creating ServiceMonitors")
@@ -967,6 +1014,32 @@ func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx conte
 		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available. Skipping the creation of the ServiceMonitors")
 	}
 	return objects, nil
+}
+
+// isEnoexecDaemonSetSAReady checks whether the enoexec-event-daemon ServiceAccount exists and
+// has imagePullSecrets provisioned by the OpenShift SA controller. Returns false if the SA does
+// not exist yet or has no imagePullSecrets.
+// Uses the cached client (r.Get) instead of a live API call because the controller already
+// Owns(&corev1.ServiceAccount{}), so the SA is in the informer cache.
+//
+// NOTE: This readiness gate assumes the OpenShift SA controller will eventually populate
+// imagePullSecrets on the ServiceAccount. On plain Kubernetes or in envtest (without the
+// OpenShift SA controller), imagePullSecrets are never auto-provisioned, so the DaemonSet
+// will not be created unless the SA is manually updated — which is why the integration test
+// simulates this via simulateSAImagePullSecretProvisioning.
+func (r *ClusterPodPlacementConfigReconciler) isEnoexecDaemonSetSAReady(ctx context.Context) (bool, error) {
+	sa := &corev1.ServiceAccount{}
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      utils.EnoexecDaemonSet,
+		Namespace: utils.Namespace(),
+	}, sa)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return len(sa.ImagePullSecrets) > 0, nil
 }
 
 func isDeploymentAvailable(deployment *appsv1.Deployment) bool {
