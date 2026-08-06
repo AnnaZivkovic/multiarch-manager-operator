@@ -1038,27 +1038,36 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 	return nonErroredCount, erroredCount
 }
 
+// cppcUpdatePredicate filters CPPC watch events to only reconcile on meaningful changes:
+// spec changes (generation bump), deletion (deletionTimestamp), and finalizer updates.
+// Status-only and label/annotation-only updates are intentionally filtered because
+// this controller is spec-driven, and status updates from r.Status().Update() would
+// otherwise re-trigger reconciliation, nullifying the 5s requeueAfter.
+func cppcUpdatePredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc:  func(e event.CreateEvent) bool { return true },
+		DeleteFunc:  func(e event.DeleteEvent) bool { return true },
+		GenericFunc: func(e event.GenericEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
+				return true
+			}
+			if !e.ObjectOld.GetDeletionTimestamp().Equal(e.ObjectNew.GetDeletionTimestamp()) {
+				return true
+			}
+			if !slices.Equal(e.ObjectOld.GetFinalizers(), e.ObjectNew.GetFinalizers()) {
+				return true
+			}
+			return false
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	c := ctrl.NewControllerManagedBy(mgr).
 		For(&multiarchv1beta1.ClusterPodPlacementConfig{},
-			builder.WithPredicates(predicate.Funcs{
-				CreateFunc: func(e event.CreateEvent) bool { return true },
-				DeleteFunc: func(e event.DeleteEvent) bool { return true },
-				UpdateFunc: func(e event.UpdateEvent) bool {
-					if e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() {
-						return true
-					}
-					if !e.ObjectOld.GetDeletionTimestamp().Equal(e.ObjectNew.GetDeletionTimestamp()) {
-						return true
-					}
-					if !slices.Equal(e.ObjectOld.GetFinalizers(), e.ObjectNew.GetFinalizers()) {
-						return true
-					}
-					return false
-				},
-				GenericFunc: func(e event.GenericEvent) bool { return true },
-			}),
+			builder.WithPredicates(cppcUpdatePredicate()),
 		).
 		// Watch PodPlacementConfig to reconcile ClusterPodPlacementConfig only on create/delete events.
 		// Updates to PodPlacementConfig are intentionally ignored.
