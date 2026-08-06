@@ -17,12 +17,16 @@ limitations under the License.
 package podplacement
 
 import (
+	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 func TestNewCELEvaluator(t *testing.T) {
@@ -269,23 +273,23 @@ func TestCELEvaluatorEvaluateRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			archs, ruleName, err := evaluator.evaluateRules(rules, tt.pod)
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-			}
+			rr := evaluator.evaluateRules(rules, tt.pod)
 			if tt.expectMatch {
-				if archs == nil {
+				if !rr.matched {
+					t.Error("Expected matched=true but got false")
+				}
+				if rr.architectures == nil {
 					t.Error("Expected architectures but got nil")
 				}
-				if len(archs) != len(tt.expectedArchs) {
-					t.Errorf("Expected %d architectures, got %d", len(tt.expectedArchs), len(archs))
+				if len(rr.architectures) != len(tt.expectedArchs) {
+					t.Errorf("Expected %d architectures, got %d", len(tt.expectedArchs), len(rr.architectures))
 				}
-				if ruleName != tt.expectedRuleName {
-					t.Errorf("Expected rule name %s, got %s", tt.expectedRuleName, ruleName)
+				if rr.ruleName != tt.expectedRuleName {
+					t.Errorf("Expected rule name %s, got %s", tt.expectedRuleName, rr.ruleName)
 				}
 			} else {
-				if archs != nil {
-					t.Errorf("Expected no match but got architectures: %v", archs)
+				if rr.matched {
+					t.Errorf("Expected no match but got matched=true with architectures: %v", rr.architectures)
 				}
 			}
 		})
@@ -1220,5 +1224,611 @@ func TestCELEvaluateGenerateName(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.expectedResult, result)
 			}
 		})
+	}
+}
+
+// ── Critical regression tests for malformed CEL / fallback interaction ────────
+
+// TestEvaluateRules_AllRulesErrored_AllErroredTrue verifies that evaluateRules
+// returns allErrored=true when every rule in the list fails to compile.
+func TestEvaluateRules_AllRulesErrored_AllErroredTrue(t *testing.T) {
+	evaluator, err := newCELEvaluator()
+	if err != nil {
+		t.Fatalf("Failed to create CEL evaluator: %v", err)
+	}
+
+	malformedRules := []plugins.ArchitectureRule{
+		{Name: "bad1", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
+		{Name: "bad2", Expression: "invalid syntax !!!!", Architectures: []string{"ppc64le"}},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+
+	rr := evaluator.evaluateRules(malformedRules, pod)
+
+	if !rr.allErrored {
+		t.Errorf("expected allErrored=true when all rules are malformed, got allErrored=false (matched=%v archs=%v)",
+			rr.matched, rr.architectures)
+	}
+	if rr.matched {
+		t.Errorf("expected matched=false when all rules are malformed, got matched=true")
+	}
+}
+
+// TestEvaluateRules_SomeErroredSomeMatchedFalse_NotAllErrored verifies that when
+// some rules error but at least one evaluates to false (no match), allErrored is
+// false and fallback is the right outcome.
+func TestEvaluateRules_SomeErroredSomeMatchedFalse_NotAllErrored(t *testing.T) {
+	evaluator, err := newCELEvaluator()
+	if err != nil {
+		t.Fatalf("Failed to create CEL evaluator: %v", err)
+	}
+
+	rules := []plugins.ArchitectureRule{
+		{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
+		// valid but does not match
+		{Name: "valid-nomatch", Expression: "self.metadata.name == 'other'", Architectures: []string{"ppc64le"}},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+
+	rr := evaluator.evaluateRules(rules, pod)
+
+	if rr.allErrored {
+		t.Errorf("expected allErrored=false when at least one valid rule exists, got allErrored=true")
+	}
+	if rr.matched {
+		t.Errorf("expected matched=false since the valid rule does not match, got matched=true")
+	}
+}
+
+// TestEvaluateCELArchitecturePlacement_MalformedCEL_ReturnsError verifies that
+// evaluateCELArchitecturePlacement returns errAllCELRulesErrored when all rules
+// fail to compile, so callers know to skip the PPC rather than apply fallback.
+func TestEvaluateCELArchitecturePlacement_MalformedCEL_ReturnsError(t *testing.T) {
+	rules := []plugins.ArchitectureRule{
+		{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
+	}
+	fallback := []string{"amd64"}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+
+	result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
+
+	if err == nil {
+		t.Fatalf("expected errAllCELRulesErrored but got nil error; result=%+v", result)
+	}
+	if err != errAllCELRulesErrored {
+		t.Errorf("expected errAllCELRulesErrored specifically, got: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil result when all rules errored, got: %+v", result)
+	}
+}
+
+// TestEvaluateCELArchitecturePlacement_MalformedHighPriority_ValidLowPriority is the
+// critical scenario from the review:
+//
+//	PPC A (priority 200): INVALID CEL + fallback amd64
+//	PPC B (priority 100): VALID CEL matching the pod → ppc64le
+//
+// Expected: PPC A is SKIPPED (errAllCELRulesErrored), PPC B is evaluated and
+// returns ppc64le.  The fallback amd64 must NOT be applied.
+//
+// This test exercises applyCELInWebhook directly, which is the layer where the
+// PPC priority loop lives.
+func TestApplyCELInWebhook_MalformedHighPriority_ValidLowPriority_ExpectPpc64le(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-workload",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			// High-priority PPC with a completely malformed CEL expression.
+			// Its fallback (amd64) must NOT be applied.
+			ObjectMeta: metav1.ObjectMeta{Name: "high-prio-malformed", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 200,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "malformed",
+								Expression:    "self.metadata.name ==", // intentionally broken
+								Architectures: []string{"amd64"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			// Lower-priority PPC with a valid CEL expression that matches the pod.
+			ObjectMeta: metav1.ObjectMeta{Name: "low-prio-valid", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"s390x"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "match-by-name",
+								Expression:    "self.metadata.name == 'my-workload'",
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// The pod must have ppc64le — NOT amd64 (which would mean the malformed PPC's
+	// fallback was incorrectly applied).
+	if wrappedPod.Spec.Affinity == nil ||
+		wrappedPod.Spec.Affinity.NodeAffinity == nil ||
+		wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Fatal("expected node affinity to be set on pod after CEL evaluation")
+	}
+
+	var foundArchs []string
+	for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				foundArchs = append(foundArchs, expr.Values...)
+			}
+		}
+	}
+
+	if len(foundArchs) != 1 || foundArchs[0] != "ppc64le" {
+		t.Errorf("expected architecture [ppc64le] from lower-priority valid PPC, got %v\n"+
+			"(If amd64 appears here, the malformed high-priority PPC's fallback was incorrectly applied.)",
+			foundArchs)
+	}
+}
+
+// TestApplyCELInWebhook_ValidHighPriority_False_FallbackApplied verifies that when
+// a high-priority PPC's CEL expression evaluates to false (not an error), its
+// fallback IS applied — this is the correct enhancement behavior.
+func TestApplyCELInWebhook_ValidHighPriority_False_FallbackApplied(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unmatched-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ppc-no-match", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"arm64"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "no-match",
+								Expression:    "self.metadata.name == 'other-pod'",
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// Fallback arm64 must be applied because the CEL expression evaluated to false.
+	var foundArchs []string
+	if wrappedPod.Spec.Affinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel {
+					foundArchs = append(foundArchs, expr.Values...)
+				}
+			}
+		}
+	}
+
+	if len(foundArchs) != 1 || foundArchs[0] != "arm64" {
+		t.Errorf("expected fallback architecture [arm64] when CEL expression evaluates to false, got %v", foundArchs)
+	}
+}
+
+// TestApplyCELInWebhook_ValidHighPriority_True_RuleApplied verifies that when a
+// high-priority PPC's CEL expression evaluates to true, its rule's architectures
+// are applied and no fallback is used.
+func TestApplyCELInWebhook_ValidHighPriority_True_RuleApplied(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "matched-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ppc-match", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "match",
+								Expression:    "self.metadata.name == 'matched-pod'",
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	var foundArchs []string
+	if wrappedPod.Spec.Affinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel {
+					foundArchs = append(foundArchs, expr.Values...)
+				}
+			}
+		}
+	}
+
+	if len(foundArchs) != 1 || foundArchs[0] != "ppc64le" {
+		t.Errorf("expected architecture [ppc64le] from matching CEL rule, got %v", foundArchs)
+	}
+}
+
+// TestApplyCELInWebhook_MultiplePPCsFirstErrors_LowerPriorityEvaluated verifies that
+// when the first (highest-priority) PPC has all-errored CEL, subsequent PPCs are evaluated.
+func TestApplyCELInWebhook_MultiplePPCsFirstErrors_LowerPriorityEvaluated(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "app-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		// Priority 300: all rules malformed → must be skipped entirely.
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "p300-malformed", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 200,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{Name: "bad", Expression: "!!! invalid", Architectures: []string{"amd64"}},
+						},
+					},
+				},
+			},
+		},
+		// Priority 100: valid matching rule → s390x.
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "p100-valid", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"arm64"},
+						Rules: []plugins.ArchitectureRule{
+							{Name: "match", Expression: "self.metadata.name == 'app-pod'", Architectures: []string{"s390x"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	var foundArchs []string
+	if wrappedPod.Spec.Affinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity != nil &&
+		wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel {
+					foundArchs = append(foundArchs, expr.Values...)
+				}
+			}
+		}
+	}
+
+	if len(foundArchs) != 1 || foundArchs[0] != "s390x" {
+		t.Errorf("expected [s390x] from valid lower-priority PPC; got %v (malformed high-priority PPC may have blocked evaluation)", foundArchs)
+	}
+}
+
+// TestApplyCELInWebhook_MalformedCEL_NoLowerPriorityMatch_NoArchSet verifies that
+// when all PPCs have malformed CEL and none match, no architecture constraint is
+// set on the pod (the pod falls through to global/image-based logic).
+func TestApplyCELInWebhook_MalformedCEL_NoLowerPriorityMatch_NoArchSet(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-match-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "all-malformed", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// No architecture constraint must be set; the pod must fall through to
+	// image-based / global logic.
+	if wrappedPod.Spec.Affinity != nil {
+		if na := wrappedPod.Spec.Affinity.NodeAffinity; na != nil {
+			if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
+				t.Errorf("expected no arch constraint when all CEL rules are malformed and no PPC claims the pod, got affinity=%+v", wrappedPod.Spec.Affinity)
+			}
+		}
+	}
+}
+
+// TestEvaluateRules_MultipleRulesOneMalformed_SubsequentEvaluated verifies that
+// within a single PPC, when the first rule is malformed and the second is valid
+// and matches, the second rule is used (soft failure model within a PPC).
+func TestEvaluateRules_MultipleRulesOneMalformed_SubsequentEvaluated(t *testing.T) {
+	evaluator, err := newCELEvaluator()
+	if err != nil {
+		t.Fatalf("Failed to create CEL evaluator: %v", err)
+	}
+
+	rules := []plugins.ArchitectureRule{
+		// Malformed rule (compile error).
+		{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
+		// Valid rule that matches.
+		{Name: "good", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+
+	rr := evaluator.evaluateRules(rules, pod)
+
+	if rr.allErrored {
+		t.Errorf("expected allErrored=false because the second rule is valid, got allErrored=true")
+	}
+	if !rr.matched {
+		t.Errorf("expected matched=true from the second valid rule, got matched=false")
+	}
+	if len(rr.architectures) != 1 || rr.architectures[0] != "ppc64le" {
+		t.Errorf("expected [ppc64le] from second rule, got %v", rr.architectures)
+	}
+}
+
+// TestEvaluateCELArchitecturePlacement_EmptyRules_FallbackApplied verifies that
+// when there are no rules (empty slice), fallback is applied correctly and
+// allErrored is not set.
+func TestEvaluateCELArchitecturePlacement_EmptyRules_FallbackApplied(t *testing.T) {
+	result, err := evaluateCELArchitecturePlacement(
+		[]plugins.ArchitectureRule{},
+		[]string{"amd64"},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+	)
+	if err != nil {
+		t.Fatalf("expected no error for empty rules, got: %v", err)
+	}
+	if result.matched {
+		t.Errorf("expected matched=false for empty rules")
+	}
+	if len(result.architectures) != 1 || result.architectures[0] != "amd64" {
+		t.Errorf("expected fallback [amd64], got %v", result.architectures)
+	}
+}
+
+// ── NodeAffinityLabel regression tests ───────────────────────────────────────
+
+// TestApplyCELInWebhook_SuccessfulCEL_NodeAffinityLabelOverriden verifies that
+// when CEL successfully applies architecture constraints, NodeAffinityLabel is
+// set to "overriden" (intentional spelling per Paul's review).
+func TestApplyCELInWebhook_SuccessfulCEL_NodeAffinityLabelOverriden(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "target-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ppc-cel-match", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "match",
+								Expression:    "self.metadata.name == 'target-pod'",
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// NodeAffinityLabel must be "overriden" when CEL successfully applied constraints.
+	got := wrappedPod.Labels[utils.NodeAffinityLabel]
+	if got != utils.NodeAffinityLabelValueOverriden {
+		t.Errorf("expected NodeAffinityLabel=%q after successful CEL, got %q",
+			utils.NodeAffinityLabelValueOverriden, got)
+	}
+}
+
+// TestApplyCELInWebhook_CELError_NodeAffinityLabelNotOverriden verifies that when all
+// CEL rules fail (malformed), NodeAffinityLabel is NOT set to "overriden".
+// The pod falls through to image-based logic; the label should remain unset at
+// this point (the webhook sets it to "not-set" before calling applyCELInWebhook,
+// but applyCELInWebhook itself must not change it to "overriden").
+func TestApplyCELInWebhook_CELError_NodeAffinityLabelNotOverriden(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "error-pod",
+			Namespace: "default",
+			Labels:    map[string]string{utils.NodeAffinityLabel: utils.LabelValueNotSet},
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ppc-malformed", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"amd64"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "bad",
+								Expression:    "self.metadata.name ==", // compile error
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// NodeAffinityLabel must NOT become "overriden" when all CEL rules errored.
+	got := wrappedPod.Labels[utils.NodeAffinityLabel]
+	if got == utils.NodeAffinityLabelValueOverriden {
+		t.Errorf("expected NodeAffinityLabel != %q when all CEL rules fail, but got %q",
+			utils.NodeAffinityLabelValueOverriden, got)
+	}
+}
+
+// TestApplyCELInWebhook_CELFallback_NodeAffinityLabelOverriden verifies that when
+// CEL rules evaluate to false (no match) and fallback architectures are applied,
+// NodeAffinityLabel is ALSO set to "overriden" — fallback is a CEL-path outcome.
+func TestApplyCELInWebhook_CELFallback_NodeAffinityLabelOverriden(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(8)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nomatch-pod",
+			Namespace: "default",
+		},
+	}
+
+	ppcs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "ppc-fallback", Namespace: "default"},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"s390x"},
+						Rules: []plugins.ArchitectureRule{
+							{
+								Name:          "no-match",
+								Expression:    "self.metadata.name == 'other'",
+								Architectures: []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh := &PodSchedulingGateMutatingWebHook{}
+	wrappedPod := newPod(pod, ctx, recorder)
+	wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+	// Fallback s390x was applied via CEL path → label must be "overriden".
+	got := wrappedPod.Labels[utils.NodeAffinityLabel]
+	if got != utils.NodeAffinityLabelValueOverriden {
+		t.Errorf("expected NodeAffinityLabel=%q after CEL fallback, got %q",
+			utils.NodeAffinityLabelValueOverriden, got)
 	}
 }

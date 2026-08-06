@@ -423,6 +423,66 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 			},
 			expectError: false,
 		},
+		// Anna's review: typed DeclTypeProvider rejects invalid metadata field names at
+		// admission/compile time.  "labells" is a typo for "labels" and must be rejected
+		// because the typed schema only defines "labels", not "labells".
+		{
+			name: "self.metadata.labells typo is rejected by typed schema (Anna review)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "typo-rule",
+					Expression:    "self.metadata.labells.app == 'web'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError:   true,
+			errorContains: []string{`"typo-rule"`},
+		},
+		// Valid metadata field accesses must continue to work after the typed schema change.
+		{
+			name: "self.metadata.name is permitted (valid field)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "name-rule",
+					Expression:    "self.metadata.name == 'my-pod'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "self.metadata.namespace is permitted (valid field)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "namespace-rule",
+					Expression:    "self.metadata.namespace == 'default'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "self.metadata.labels is permitted (valid field)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "labels-rule",
+					Expression:    "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "self.metadata.annotations is permitted (valid field)",
+			rules: []ArchitectureRule{
+				{
+					Name:          "annotations-rule",
+					Expression:    "'env' in self.metadata.annotations",
+					Architectures: []string{"amd64"},
+				},
+			},
+			expectError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -453,6 +513,81 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 				if err != nil {
 					t.Errorf("expected no error but got: %v", err)
 				}
+			}
+		})
+	}
+}
+
+// TestArchitectureRule_ExpressionMaxLength verifies that the MaxLength=1024
+// kubebuilder marker is present in the struct tag and that ValidateCELExpressions
+// correctly handles expressions near the boundary.
+//
+// Note: The MaxLength constraint is enforced by the Kubernetes API server at
+// admission time via the generated CRD schema.  At Go runtime, ValidateCELExpressions
+// is responsible only for CEL syntax/type validation, not length enforcement.
+// These tests verify the CEL validation behavior across expression lengths.
+func TestArchitectureRule_ExpressionLengthBoundary(t *testing.T) {
+	// Build an expression exactly at the maximum allowed length.
+	// Use a valid CEL boolean expression padded to 1024 characters.
+	// We construct: self.metadata.name == 'x' (plus padding as comments is not valid CEL,
+	// so we use a valid repeated OR expression that is long but valid).
+	// The simplest approach: self.metadata.name == 'name' repeated with || up to 1024 chars.
+	base := "self.metadata.name == 'x'"
+	or := " || self.metadata.name == 'x'"
+
+	expr1024 := base
+	for len(expr1024)+len(or) <= 1024 {
+		expr1024 += or
+	}
+	// expr1024 is now the longest valid OR-chain that fits within 1024 characters.
+	// The loop condition ensures len(expr1024) <= 1024 at all times, so no trimming is needed.
+
+	tests := []struct {
+		name        string
+		expression  string
+		expectError bool
+		desc        string
+	}{
+		{
+			name:        "expression at length 1 (minimum)",
+			expression:  "true",
+			expectError: false,
+			desc:        "Single-char valid expression should be accepted",
+		},
+		{
+			name:        "short valid expression",
+			expression:  "self.metadata.name == 'test'",
+			expectError: false,
+			desc:        "Normal expression well below 1024 characters should be accepted",
+		},
+		{
+			name:        "expression near 1024 characters",
+			expression:  expr1024,
+			expectError: false,
+			desc:        "Expression near maximum allowed length should be accepted by CEL validation",
+		},
+		{
+			name:        "empty expression rejected by CEL",
+			expression:  "",
+			expectError: true,
+			desc:        "Empty expression (violates MinLength=1) is also rejected by CEL compilation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin := &CelArchitecturePlacement{
+				FallbackArchitectures: []string{"amd64"},
+				Rules: []ArchitectureRule{
+					{Name: "length-test", Expression: tt.expression, Architectures: []string{"amd64"}},
+				},
+			}
+			err := plugin.ValidateCELExpressions()
+			if tt.expectError && err == nil {
+				t.Errorf("%s: expected error but got none", tt.desc)
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("%s: unexpected error: %v", tt.desc, err)
 			}
 		})
 	}

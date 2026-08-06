@@ -75,6 +75,7 @@ type ArchitectureRule struct {
 	// The expression has access to the pod via the 'self' variable.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
 	Expression string `json:"expression" protobuf:"bytes,2,opt,name=expression"`
 
 	// Architectures is the list of target architectures to use when this rule matches.

@@ -50,20 +50,25 @@ const (
 	// currently enforced by the operator.
 	PreferredNodeAffinitySourcesAnnotation = "multiarch.openshift.io/preferred-affinity-sources"
 	NodeAffinityLabelValueSet              = "set"
-	LabelValueNotSet                       = "not-set"
-	HostnameLabel                          = "kubernetes.io/hostname"
-	SchedulingGateLabel                    = "multiarch.openshift.io/scheduling-gate"
-	SchedulingGateLabelValueGated          = "gated"
-	SchedulingGateLabelValueRemoved        = "removed"
-	PodPlacementFinalizerName              = "finalizers.multiarch.openshift.io/pod-placement"
-	CPPCNoPPCObjectFinalizer               = "finalizers.multiarch.openshift.io/no-pod-placement-config"
-	SingleArchLabel                        = "multiarch.openshift.io/single-arch"
-	MultiArchLabel                         = "multiarch.openshift.io/multi-arch"
-	NoSupportedArchLabel                   = "multiarch.openshift.io/no-supported-arch"
-	FallbackArchitectureLabel              = "multiarch.openshift.io/fallback-arch"
-	ImageInspectionErrorLabel              = "multiarch.openshift.io/image-inspect-error"
-	ImageInspectionErrorCountLabel         = "multiarch.openshift.io/image-inspect-error-count"
-	LabelGroup                             = "multiarch.openshift.io"
+	// NodeAffinityLabelValueOverriden is the value set on NodeAffinityLabel when a CEL
+	// plugin successfully applies architecture constraints to a pod, indicating that the
+	// normal image-inspection path was overriden by a PodPlacementConfig CEL rule or
+	// fallback.
+	NodeAffinityLabelValueOverriden = "overriden"
+	LabelValueNotSet                = "not-set"
+	HostnameLabel                   = "kubernetes.io/hostname"
+	SchedulingGateLabel             = "multiarch.openshift.io/scheduling-gate"
+	SchedulingGateLabelValueGated   = "gated"
+	SchedulingGateLabelValueRemoved = "removed"
+	PodPlacementFinalizerName       = "finalizers.multiarch.openshift.io/pod-placement"
+	CPPCNoPPCObjectFinalizer        = "finalizers.multiarch.openshift.io/no-pod-placement-config"
+	SingleArchLabel                 = "multiarch.openshift.io/single-arch"
+	MultiArchLabel                  = "multiarch.openshift.io/multi-arch"
+	NoSupportedArchLabel            = "multiarch.openshift.io/no-supported-arch"
+	FallbackArchitectureLabel       = "multiarch.openshift.io/fallback-arch"
+	ImageInspectionErrorLabel       = "multiarch.openshift.io/image-inspect-error"
+	ImageInspectionErrorCountLabel  = "multiarch.openshift.io/image-inspect-error-count"
+	LabelGroup                      = "multiarch.openshift.io"
 )
 
 const (

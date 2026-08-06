@@ -1,6 +1,6 @@
 module github.com/openshift/multiarch-tuning-operator
 
-go 1.26.3
+go 1.26.4
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -37,8 +37,6 @@ require (
 	sigs.k8s.io/kustomize/kyaml v0.21.1
 )
 
-require github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
-
 require (
 	cel.dev/expr v0.25.2 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
@@ -58,7 +56,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker v28.5.2+incompatible // indirect
-	github.com/docker/docker-credential-helpers v0.9.8 // indirect; indirectk8s.io/api
+	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-events v0.0.0-20260608200158-dbf6103125a4 // indirect
 	github.com/docker/go-metrics v0.0.1 // indirect
@@ -124,6 +122,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/prometheus v0.69.0 // indirect
 	go.opentelemetry.io/contrib/exporters/autoexport v0.69.0 // indirect

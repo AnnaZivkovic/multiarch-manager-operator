@@ -1,4 +1,4 @@
-ARG BUILD_IMAGE=registry.access.redhat.com/ubi9/go-toolset:1.26.3
+ARG BUILD_IMAGE=registry.access.redhat.com/ubi9/go-toolset:1.26.4
 ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
 FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
@@ -47,8 +47,8 @@ USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
 LABEL name="multiarch-tuning/multiarch-tuning-operator"
-LABEL release="1.3.2"
-LABEL version="1.3.2"
+LABEL release="1.3.4"
+LABEL version="1.3.4"
 LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.3::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."

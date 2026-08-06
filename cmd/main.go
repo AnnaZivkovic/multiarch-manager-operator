@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -269,7 +270,38 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		ants.Release()
 	})
-	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), clientset, mgr.GetScheme(),
+
+	// ppcCacheSynced is a lazy, once-resolved function that returns the
+	// HasSynced state of the PodPlacementConfig informer.
+	// The informer can only be fetched after the manager cache has started,
+	// so we resolve it on the first call rather than at registration time.
+	// Until the informer is resolved, the function returns false (not yet synced),
+	// which keeps the apiReader fallback enabled — the safe default at startup.
+	var (
+		ppcHasSynced func() bool
+		ppcOnce      sync.Once
+	)
+	ppcCacheSynced := func() bool {
+		ppcOnce.Do(func() {
+			informer, err := mgr.GetCache().GetInformerForKind(
+				context.Background(),
+				multiarchv1beta1.GroupVersion.WithKind(multiarchv1beta1.PodPlacementConfigKind),
+			)
+			if err != nil {
+				// If the informer cannot be obtained, treat cache as not synced
+				// so that the apiReader fallback remains enabled.
+				setupLog.Error(err, "failed to get PodPlacementConfig informer for cache sync check; apiReader fallback will remain active")
+				return
+			}
+			ppcHasSynced = informer.HasSynced
+		})
+		if ppcHasSynced == nil {
+			return false
+		}
+		return ppcHasSynced()
+	}
+
+	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 }

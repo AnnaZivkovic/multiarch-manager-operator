@@ -25,6 +25,7 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 // applyCELArchitecturePlacement evaluates and applies celArchitecturePlacement plugin rules
@@ -77,6 +78,11 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 			"fallbackArchitectures", result.architectures)
 		return false
 	}
+
+	// CEL successfully applied architecture constraints. Mark the pod so downstream
+	// components (e.g. reconciler, e2e tests) can distinguish CEL-placed pods from
+	// image-inspection-placed pods. The value "overriden" is intentional per review.
+	pod.EnsureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueOverriden)
 
 	// Publish event
 	configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)

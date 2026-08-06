@@ -48,14 +48,18 @@ import (
 
 // PodSchedulingGateMutatingWebHook annotates Pods
 type PodSchedulingGateMutatingWebHook struct {
-	client     client.Client
-	apiReader  client.Reader
-	clientSet  *kubernetes.Clientset
-	decoder    admission.Decoder
-	once       sync.Once
-	scheme     *runtime.Scheme
-	recorder   record.EventRecorder
-	workerPool *ants.MultiPool
+	client    client.Client
+	apiReader client.Reader
+	// ppcCacheSynced returns true once the PodPlacementConfig informer cache has
+	// completed its initial list/sync.  When nil it is treated as "not yet synced"
+	// so the apiReader fallback is always permitted in that case.
+	ppcCacheSynced func() bool
+	clientSet      *kubernetes.Clientset
+	decoder        admission.Decoder
+	once           sync.Once
+	scheme         *runtime.Scheme
+	recorder       record.EventRecorder
+	workerPool     *ants.MultiPool
 }
 
 func (a *PodSchedulingGateMutatingWebHook) patchedPodResponse(pod *corev1.Pod, req admission.Request) admission.Response {
@@ -98,7 +102,13 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 		// On error, proceed without PPC filtering - fail open
 		ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
 	}
-	if len(ppcList.Items) == 0 && a.apiReader != nil {
+	// Fall back to a direct API-server read only when the informer cache has not
+	// yet completed its initial sync AND the cache returned no items.  Once the
+	// cache is synced, an empty result genuinely means no PPCs exist in this
+	// namespace and querying the API server on every Pod would generate unnecessary
+	// traffic.
+	cacheNotYetSynced := a.ppcCacheSynced == nil || !a.ppcCacheSynced()
+	if len(ppcList.Items) == 0 && a.apiReader != nil && cacheNotYetSynced {
 		if err := a.apiReader.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
 			log.Error(err, "Failed to list PodPlacementConfigs from API server (webhook fallback)")
 			ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
@@ -237,6 +247,11 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 			continue
 		}
 
+		// CEL successfully applied architecture constraints. Mark the pod so downstream
+		// components (e.g. reconciler, e2e tests) can distinguish CEL-placed pods from
+		// image-inspection-placed pods. The value "overriden" is intentional per review.
+		pod.EnsureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueOverriden)
+
 		log.V(1).Info("Applied CEL architecture constraints",
 			"pod", pod.Name,
 			"PodPlacementConfig", ppc.Name,
@@ -249,15 +264,21 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 	}
 }
 
-func NewPodSchedulingGateMutatingWebHook(client client.Client, apiReader client.Reader, clientSet *kubernetes.Clientset,
-	scheme *runtime.Scheme, recorder record.EventRecorder, workerPool *ants.MultiPool) *PodSchedulingGateMutatingWebHook {
+// NewPodSchedulingGateMutatingWebHook creates a new webhook instance.
+// ppcCacheSynced should return true once the PodPlacementConfig informer cache
+// has completed its initial sync; pass nil to always allow the apiReader fallback
+// (safe for unit tests that do not wire an informer).
+func NewPodSchedulingGateMutatingWebHook(client client.Client, apiReader client.Reader, ppcCacheSynced func() bool,
+	clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder,
+	workerPool *ants.MultiPool) *PodSchedulingGateMutatingWebHook {
 	a := &PodSchedulingGateMutatingWebHook{
-		client:     client,
-		apiReader:  apiReader,
-		clientSet:  clientSet,
-		scheme:     scheme,
-		recorder:   recorder,
-		workerPool: workerPool,
+		client:         client,
+		apiReader:      apiReader,
+		ppcCacheSynced: ppcCacheSynced,
+		clientSet:      clientSet,
+		scheme:         scheme,
+		recorder:       recorder,
+		workerPool:     workerPool,
 	}
 	metrics.InitWebhookMetrics()
 	return a

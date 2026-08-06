@@ -43,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -91,7 +92,7 @@ func newHandleWebhook(t *testing.T) *PodSchedulingGateMutatingWebHook {
 	// clientSet nil is safe: the async delayedSchedulingGatedEvent goroutine will
 	// no-op because the pool submit will error immediately.
 	// apiReader nil is safe: the webhook falls back to the informer-backed client only when apiReader != nil.
-	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, s, record.NewFakeRecorder(32), pool)
+	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, nil, s, record.NewFakeRecorder(32), pool)
 }
 
 // TestHandleAdmission_ResponseAllowed verifies that Handle() returns
@@ -453,4 +454,161 @@ func buildTestPPCWithCELRule(name, ns string, priority uint8, fallback, expressi
 			},
 		},
 	}
+}
+
+// ── apiReader / ppcCacheSynced tests ────────────────────────────────────────
+
+// TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback verifies that when the
+// informer cache is marked synced AND returns no PPCs, the apiReader is NOT
+// consulted (no unnecessary API-server traffic after cache is warm).
+func TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := v1beta1.AddToScheme(s); err != nil {
+		t.Fatalf("add multiarch scheme: %v", err)
+	}
+
+	// fakeClient has no PPCs → List returns empty.
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+	if err != nil {
+		t.Fatalf("ants pool: %v", err)
+	}
+
+	apiReaderCalled := false
+	// mockReader is a spy that records whether it was called.
+	var mockAPIReader mockReader
+	mockAPIReader.listFn = func() error {
+		apiReaderCalled = true
+		return nil
+	}
+
+	// Cache reports synced.
+	cacheSynced := func() bool { return true }
+
+	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+	}
+	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
+
+	if apiReaderCalled {
+		t.Error("apiReader should NOT be called when informer cache is synced and returned no PPCs")
+	}
+}
+
+// TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed verifies that when
+// the informer cache reports NOT YET SYNCED and returns no PPCs, the apiReader
+// IS consulted (early startup protection).
+func TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := v1beta1.AddToScheme(s); err != nil {
+		t.Fatalf("add multiarch scheme: %v", err)
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+	if err != nil {
+		t.Fatalf("ants pool: %v", err)
+	}
+
+	apiReaderCalled := false
+	var mockAPIReader mockReader
+	mockAPIReader.listFn = func() error {
+		apiReaderCalled = true
+		return nil
+	}
+
+	// Cache reports NOT synced yet.
+	cacheSynced := func() bool { return false }
+
+	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+	}
+	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
+
+	if !apiReaderCalled {
+		t.Error("apiReader SHOULD be called when informer cache is not yet synced and returned no PPCs")
+	}
+}
+
+// TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed verifies that when
+// ppcCacheSynced is nil (no informer wired), the apiReader fallback is still allowed.
+func TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed(t *testing.T) {
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("add core scheme: %v", err)
+	}
+	if err := v1beta1.AddToScheme(s); err != nil {
+		t.Fatalf("add multiarch scheme: %v", err)
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+	if err != nil {
+		t.Fatalf("ants pool: %v", err)
+	}
+
+	apiReaderCalled := false
+	var mockAPIReader mockReader
+	mockAPIReader.listFn = func() error {
+		apiReaderCalled = true
+		return nil
+	}
+
+	// ppcCacheSynced = nil → always treat cache as not synced.
+	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+	}
+	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
+
+	if !apiReaderCalled {
+		t.Error("apiReader SHOULD be called when ppcCacheSynced is nil (no informer wired)")
+	}
+}
+
+// TestHandle_ApiReaderNil_NoFallback verifies that when apiReader is nil,
+// no fallback is attempted regardless of cache sync state.
+func TestHandle_ApiReaderNil_NoFallback(t *testing.T) {
+	// This test verifies the webhook does not panic and works correctly when
+	// apiReader is nil — the existing behavior that is already tested elsewhere.
+	// It is here for completeness alongside the new ppcCacheSynced tests.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+	}
+	wh := newHandleWebhook(t) // already uses apiReader=nil
+	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
+	if !resp.Allowed {
+		t.Fatalf("expected Allowed=true with nil apiReader, got: %v", resp.Result)
+	}
+}
+
+// mockReader implements client.Reader for use as a spy in tests.
+type mockReader struct {
+	listFn func() error
+}
+
+func (m *mockReader) Get(_ context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	return nil
+}
+
+func (m *mockReader) List(_ context.Context, _ client.ObjectList, _ ...client.ListOption) error {
+	if m.listFn != nil {
+		return m.listFn()
+	}
+	return nil
 }

@@ -143,18 +143,15 @@ func podToMap(pod *corev1.Pod) map[string]interface{} {
 	}
 }
 
-// evaluate evaluates a CEL expression against a Pod.
+// evaluateWithMap evaluates a compiled CEL expression against a pre-built pod map.
 // Returns true if the expression matches, false otherwise.
 // Errors from compilation or runtime evaluation are returned to the caller;
 // it is the caller's responsibility to decide how to handle them (e.g. skip or abort).
-func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error) {
+func (e *celEvaluator) evaluateWithMap(expression string, podMap map[string]interface{}) (bool, error) {
 	prog, err := e.compile(expression)
 	if err != nil {
 		return false, err
 	}
-
-	// Convert pod to a map structure for CEL evaluation
-	podMap := podToMap(pod)
 
 	// Evaluate the expression
 	val, _, err := prog.Eval(map[string]interface{}{
@@ -181,26 +178,75 @@ func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error
 	return val.Value().(bool), nil
 }
 
+// evaluate evaluates a CEL expression against a Pod.
+// podToMap is called internally; prefer evaluateWithMap when evaluating multiple
+// rules for the same Pod to avoid repeated conversion.
+func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error) {
+	return e.evaluateWithMap(expression, podToMap(pod))
+}
+
+// rulesEvalResult is returned by evaluateRules to distinguish between three
+// distinct outcomes that the caller must handle differently:
+//
+//   - matched=true:  a rule evaluated successfully to true → use its architectures
+//   - matched=false, allErrored=false: all rules evaluated to false → use fallback
+//   - matched=false, allErrored=true:  every rule failed to compile or evaluate
+//     (the PPC's CEL configuration is malformed) → skip this PPC entirely;
+//     do NOT apply fallback, do NOT claim the Pod
+type rulesEvalResult struct {
+	architectures []string
+	ruleName      string
+	matched       bool
+	// allErrored is true when every rule produced an evaluation error and no
+	// rule was successfully evaluated (even to false).  The caller must treat
+	// the PPC as invalid and skip it rather than applying fallback.
+	allErrored bool
+}
+
 // evaluateRules evaluates CEL rules in order and returns the first matching rule's architectures.
-// Returns nil architectures and an empty rule name if no rules match.
-// Rules that fail evaluation (e.g. a runtime error against a specific pod) are skipped and
-// evaluation continues with the next rule. This soft-failure model keeps pod admission alive
-// even when a single expression has an unexpected runtime fault.
-func (e *celEvaluator) evaluateRules(rules []plugins.ArchitectureRule, pod *corev1.Pod) ([]string, string, error) {
+// Rules that fail to compile or evaluate at runtime are skipped; evaluation continues with
+// the next rule. This soft-failure model keeps pod admission alive even when a single
+// expression has an unexpected runtime fault.
+//
+// podToMap is called once per Pod and the resulting map is reused across all rules.
+//
+// The returned rulesEvalResult.allErrored distinguishes "all rules errored" from
+// "all rules evaluated to false", which is critical for the caller to decide
+// whether to apply fallback or skip the PPC entirely.
+func (e *celEvaluator) evaluateRules(rules []plugins.ArchitectureRule, pod *corev1.Pod) rulesEvalResult {
+	// Convert pod to map once — reused for every rule in this PPC.
+	podMap := podToMap(pod)
+
+	atLeastOneEvaluated := false
 	for _, rule := range rules {
-		matched, err := e.evaluate(rule.Expression, pod)
+		matched, err := e.evaluateWithMap(rule.Expression, podMap)
 		if err != nil {
-			// Runtime evaluation errors are skipped so that a single bad expression does not
-			// block all subsequent rules. The caller receives a non-error return (nil, "", nil)
-			// only when *all* rules are exhausted; a per-rule skip is intentional.
+			// This rule failed to compile or had a runtime error; skip it.
+			// Continue to see if subsequent rules are valid.
 			continue
 		}
+		// This rule was successfully evaluated (result is true or false).
+		atLeastOneEvaluated = true
 		if matched {
 			// First match wins; remaining rules are not evaluated.
-			return rule.Architectures, rule.Name, nil
+			return rulesEvalResult{
+				architectures: rule.Architectures,
+				ruleName:      rule.Name,
+				matched:       true,
+				allErrored:    false,
+			}
 		}
 	}
-	return nil, "", nil
+
+	if len(rules) > 0 && !atLeastOneEvaluated {
+		// Every rule produced an error; the PPC configuration is entirely
+		// malformed for this pod.  Signal to the caller to skip this PPC.
+		return rulesEvalResult{allErrored: true}
+	}
+
+	// No rules matched (some may have errored and been skipped); caller should
+	// apply fallback architectures.
+	return rulesEvalResult{matched: false, allErrored: false}
 }
 
 // evaluateResult represents the result of CEL rule evaluation
@@ -210,9 +256,13 @@ type evaluateResult struct {
 	matched       bool
 }
 
-// evaluateCELArchitecturePlacement evaluates the celArchitecturePlacement plugin rules
-// Returns the architectures to apply and whether a rule matched
-// Uses a package-level evaluator for expression caching across pod evaluations
+// evaluateCELArchitecturePlacement evaluates the celArchitecturePlacement plugin rules.
+// Returns the architectures to apply and whether a rule matched, or an error when the
+// evaluator itself cannot be initialized.
+//
+// When all rules in the PPC are malformed (compile / evaluation errors), returns
+// errAllCELRulesErrored so the caller can skip this PPC without applying fallback.
+// Uses a package-level evaluator for expression caching across pod evaluations.
 func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallbackArchitectures []string, pod *corev1.Pod) (*evaluateResult, error) {
 	if rules == nil && fallbackArchitectures == nil {
 		return nil, fmt.Errorf("both rules and fallbackArchitectures are nil")
@@ -224,28 +274,38 @@ func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallback
 		return nil, fmt.Errorf("failed to get CEL evaluator: %w", err)
 	}
 
-	// Evaluate rules in order - detailed logging happens in the caller (cel_integration.go)
-	architectures, ruleName, err := evaluator.evaluateRules(rules, pod)
-	if err != nil {
-		return nil, fmt.Errorf("error evaluating CEL rules: %w", err)
+	// Evaluate rules in order — podToMap is called once inside evaluateRules.
+	rr := evaluator.evaluateRules(rules, pod)
+
+	if rr.allErrored {
+		// Every rule in this PPC failed to compile or evaluate.  Returning an
+		// error here signals to the caller (applyCELInWebhook / applyCELArchitecturePlacement)
+		// to skip this PPC rather than applying fallback — a malformed PPC must
+		// not claim the Pod and must not block lower-priority PPCs.
+		return nil, errAllCELRulesErrored
 	}
 
-	if architectures != nil {
-		// A rule matched
+	if rr.matched {
 		return &evaluateResult{
-			architectures: architectures,
-			ruleName:      ruleName,
+			architectures: rr.architectures,
+			ruleName:      rr.ruleName,
 			matched:       true,
 		}, nil
 	}
 
-	// No rules matched, use fallback architectures
+	// No rules matched (and at least one was validly evaluated, or there are no
+	// rules at all) — apply fallback architectures as specified by the enhancement.
 	return &evaluateResult{
 		architectures: fallbackArchitectures,
 		ruleName:      "",
 		matched:       false,
 	}, nil
 }
+
+// errAllCELRulesErrored is returned by evaluateCELArchitecturePlacement when
+// every rule in a PPC fails to compile or evaluate.  Callers must skip the PPC
+// rather than applying its fallback architectures.
+var errAllCELRulesErrored = fmt.Errorf("all CEL rules in PPC failed to evaluate (malformed expressions); PPC skipped")
 
 // validateCELExpression validates a CEL expression without evaluating it
 // This can be used for validation at admission time

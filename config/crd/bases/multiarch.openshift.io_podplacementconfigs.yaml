@@ -142,6 +142,7 @@ spec:
                                 Expression is a CEL expression that evaluates against a Pod resource.
                                 The expression must return a boolean value.
                                 The expression has access to the pod via the 'self' variable.
+                              maxLength: 1024
                               minLength: 1
                               type: string
                             name:
