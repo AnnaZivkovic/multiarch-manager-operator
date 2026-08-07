@@ -4,10 +4,12 @@ reviewers:
   - Prashanth684
   - lwan-wanglin
   - jcpowermac
+  - bshaw7
 approvers:
   - aleskandro
   - AnnaZivkovic 
   - Prashanth684
   - lwan-wanglin
   - jcpowermac
+  - bshaw7
 components: multiarch-tuning-operator
