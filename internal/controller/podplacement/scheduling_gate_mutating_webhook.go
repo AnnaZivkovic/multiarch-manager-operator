@@ -152,6 +152,10 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 }
 
 func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx context.Context, pod *corev1.Pod) {
+	if a.clientSet == nil {
+		// The scheduling-gated event is informational-only.
+		return
+	}
 	err := a.workerPool.Submit(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()

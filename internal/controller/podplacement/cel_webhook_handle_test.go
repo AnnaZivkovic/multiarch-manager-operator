@@ -34,7 +34,9 @@ package podplacement
 import (
 	"context"
 	"encoding/json"
-	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	jsonpatch "gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -55,12 +57,9 @@ import (
 )
 
 // buildHandleRequest encodes a Pod as a raw CREATE admission.Request.
-func buildHandleRequest(t *testing.T, pod *corev1.Pod) admission.Request {
-	t.Helper()
+func buildHandleRequest(pod *corev1.Pod) admission.Request {
 	raw, err := json.Marshal(pod)
-	if err != nil {
-		t.Fatalf("failed to marshal pod: %v", err)
-	}
+	Expect(err).NotTo(HaveOccurred(), "failed to marshal pod")
 	return admission.Request{
 		AdmissionRequest: admissionv1.AdmissionRequest{
 			UID:       "test-uid",
@@ -75,266 +74,305 @@ func buildHandleRequest(t *testing.T, pod *corev1.Pod) admission.Request {
 // client (empty store) so that client.List returns an empty PPC list without
 // hitting a real API server.  The scheme is populated so that
 // admission.NewDecoder can decode Pods.
-func newHandleWebhook(t *testing.T) *PodSchedulingGateMutatingWebHook {
-	t.Helper()
+func newHandleWebhook() *PodSchedulingGateMutatingWebHook {
 	s := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := v1beta1.AddToScheme(s); err != nil {
-		t.Fatalf("add multiarch scheme: %v", err)
-	}
+	Expect(clientgoscheme.AddToScheme(s)).To(Succeed(), "add core scheme")
+	Expect(v1beta1.AddToScheme(s)).To(Succeed(), "add multiarch scheme")
 	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
 	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-	if err != nil {
-		t.Fatalf("ants pool: %v", err)
-	}
-	// clientSet nil is safe: the async delayedSchedulingGatedEvent goroutine will
-	// no-op because the pool submit will error immediately.
+	Expect(err).NotTo(HaveOccurred(), "ants pool")
+	// clientSet nil is safe: delayedSchedulingGatedEvent skips the goroutine when
+	// clientSet is nil (informational-only path, not required for admission logic).
 	// apiReader nil is safe: the webhook falls back to the informer-backed client only when apiReader != nil.
 	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, nil, s, record.NewFakeRecorder(32), pool)
 }
 
-// TestHandleAdmission_ResponseAllowed verifies that Handle() returns
-// Allowed=true for a plain pod.
-func TestHandleAdmission_ResponseAllowed(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
+var _ = Describe("Webhook CEL Handle admission", func() {
 
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true, got: %v", resp.Result)
-	}
-}
-
-// TestHandleAdmission_SchedulingGatePatchPresent verifies that the response
-// patch contains an operation that adds the scheduling gate.
-func TestHandleAdmission_SchedulingGatePatchPresent(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true, got: %v", resp.Result)
-	}
-
-	// The patch must contain /spec/schedulingGates.
-	gateFound := false
-	for _, p := range resp.Patches {
-		if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
-			gateFound = true
+	// TestHandleAdmission_ResponseAllowed
+	It("should return Allowed=true for a plain pod", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
 		}
-	}
-	if !gateFound {
-		t.Errorf("expected patch to add /spec/schedulingGates; patches=%v", resp.Patches)
-	}
-}
-
-// TestHandleAdmission_SchedulingGateLabelPatchPresent verifies that the label
-// marking the pod as gated is included in the patch.
-func TestHandleAdmission_SchedulingGateLabelPatchPresent(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true, got: %v", resp.Result)
-	}
-
-	// Reconstruct the full patched pod by applying the JSON patches to the
-	// original pod JSON, so we can inspect the final state.
-	originalJSON, _ := json.Marshal(pod)
-	patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
-	if err != nil {
-		// Fallback: inspect labels directly via the in-memory webhook state
-		// by checking patch values.
-		for _, p := range resp.Patches {
-			if p.Path == "/metadata/labels" || p.Path == "/metadata/labels/"+escapeJSONPointer(utils.SchedulingGateLabel) {
-				return // Label patch found, test passes
-			}
-		}
-		t.Fatalf("could not apply patches: %v; patches=%v", err, resp.Patches)
-		return
-	}
-
-	var patched corev1.Pod
-	if unmarshalErr := json.Unmarshal(patchedJSON, &patched); unmarshalErr != nil {
-		t.Fatalf("unmarshal patched pod: %v", unmarshalErr)
-	}
-	if patched.Labels[utils.SchedulingGateLabel] != utils.SchedulingGateLabelValueGated {
-		t.Errorf("label %q = %q, want %q — all labels: %v",
-			utils.SchedulingGateLabel, patched.Labels[utils.SchedulingGateLabel],
-			utils.SchedulingGateLabelValueGated, patched.Labels)
-	}
-}
-
-// TestHandleAdmission_PodWithNodeName_GateNotAdded verifies that pods
-// already bound to a node (spec.nodeName set) are not gated.
-func TestHandleAdmission_PodWithNodeName_GateNotAdded(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "bound-pod", Namespace: "test-wh"},
-		Spec: corev1.PodSpec{
-			NodeName:   "worker-1",
-			Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-		},
-	}
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true for already-bound pod, got: %v", resp.Result)
-	}
-	for _, p := range resp.Patches {
-		if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
-			t.Errorf("should not add scheduling gate to pod with NodeName set; patch=%v", p)
-		}
-	}
-}
-
-// TestHandleAdmission_BadRawInput_ReturnsBadRequest verifies that Handle()
-// returns an Errored (not Allowed) response when the raw object bytes cannot
-// be decoded as a Pod.  (namespace irrelevant — decode fails before gate check)
-func TestHandleAdmission_BadRawInput_ReturnsBadRequest(t *testing.T) {
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), admission.Request{
-		AdmissionRequest: admissionv1.AdmissionRequest{
-			UID:       "bad-uid",
-			Operation: admissionv1.Create,
-			Object:    runtime.RawExtension{Raw: []byte(`{invalid json`)},
-			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-		},
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
 	})
 
-	if resp.Allowed {
-		t.Error("expected Allowed=false for malformed raw input, got Allowed=true")
-	}
-}
+	// TestHandleAdmission_SchedulingGatePatchPresent
+	It("should include a patch that adds /spec/schedulingGates", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
 
-// TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate verifies the full
-// Handle() pipeline when the incoming pod already carries the MTO scheduling
-// gate (e.g. a retry or re-created pod).  No duplicate gate must be added.
-func TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "test-wh"},
-		Spec: corev1.PodSpec{
-			SchedulingGates: []corev1.PodSchedulingGate{{Name: utils.SchedulingGateName}},
-			Containers:      []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-		},
-	}
-	wh := newHandleWebhook(t)
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true, got: %v", resp.Result)
-	}
-
-	// Apply patches and verify there is exactly one scheduling gate.
-	originalJSON, _ := json.Marshal(pod)
-	patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
-	if err != nil {
-		// If patch application fails (e.g. JSON Merge Patch vs JSON Patch),
-		// count the /spec/schedulingGates 'add' patches and verify at most one.
-		addGateOps := 0
+		gateFound := false
 		for _, p := range resp.Patches {
 			if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
-				addGateOps++
+				gateFound = true
 			}
 		}
-		if addGateOps > 1 {
-			t.Errorf("expected at most 1 add-schedulingGates patch, got %d", addGateOps)
-		}
-		return
-	}
+		Expect(gateFound).To(BeTrue(),
+			"expected patch to add /spec/schedulingGates; patches=%v", resp.Patches)
+	})
 
-	var patched corev1.Pod
-	if unmarshalErr := json.Unmarshal(patchedJSON, &patched); unmarshalErr != nil {
-		t.Fatalf("unmarshal patched pod: %v", unmarshalErr)
-	}
-
-	count := 0
-	for _, g := range patched.Spec.SchedulingGates {
-		if g.Name == utils.SchedulingGateName {
-			count++
+	// TestHandleAdmission_SchedulingGateLabelPatchPresent
+	It("should include the scheduling gate label in the patch", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
 		}
-	}
-	if count > 1 {
-		t.Errorf("expected exactly 1 scheduling gate in patched pod, got %d — gates=%v",
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
+
+		originalJSON, _ := json.Marshal(pod)
+		patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
+		if err != nil {
+			// Fallback: inspect labels directly via the patch values.
+			for _, p := range resp.Patches {
+				if p.Path == "/metadata/labels" || p.Path == "/metadata/labels/"+escapeJSONPointer(utils.SchedulingGateLabel) {
+					return // Label patch found, test passes
+				}
+			}
+			Fail("could not apply patches: " + err.Error())
+			return
+		}
+
+		var patched corev1.Pod
+		Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
+		Expect(patched.Labels[utils.SchedulingGateLabel]).To(Equal(utils.SchedulingGateLabelValueGated),
+			"label %q = %q, want %q — all labels: %v",
+			utils.SchedulingGateLabel, patched.Labels[utils.SchedulingGateLabel],
+			utils.SchedulingGateLabelValueGated, patched.Labels)
+	})
+
+	// TestHandleAdmission_PodWithNodeName_GateNotAdded
+	It("should not add the scheduling gate to pods already bound to a node (NodeName set)", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "bound-pod", Namespace: "test-wh"},
+			Spec: corev1.PodSpec{
+				NodeName:   "worker-1",
+				Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
+			},
+		}
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true for already-bound pod")
+		for _, p := range resp.Patches {
+			Expect(p.Path == "/spec/schedulingGates" && p.Operation == "add").To(BeFalse(),
+				"should not add scheduling gate to pod with NodeName set; patch=%v", p)
+		}
+	})
+
+	// TestHandleAdmission_BadRawInput_ReturnsBadRequest
+	It("should return Allowed=false when the raw object bytes cannot be decoded as a Pod", func() {
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), admission.Request{
+			AdmissionRequest: admissionv1.AdmissionRequest{
+				UID:       "bad-uid",
+				Operation: admissionv1.Create,
+				Object:    runtime.RawExtension{Raw: []byte(`{invalid json`)},
+				Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			},
+		})
+		Expect(resp.Allowed).To(BeFalse(), "expected Allowed=false for malformed raw input")
+	})
+
+	// TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate
+	It("should not add a duplicate scheduling gate when the pod already carries it", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "test-wh"},
+			Spec: corev1.PodSpec{
+				SchedulingGates: []corev1.PodSchedulingGate{{Name: utils.SchedulingGateName}},
+				Containers:      []corev1.Container{{Name: "c", Image: "nginx:latest"}},
+			},
+		}
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true")
+
+		originalJSON, _ := json.Marshal(pod)
+		patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
+		if err != nil {
+			addGateOps := 0
+			for _, p := range resp.Patches {
+				if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
+					addGateOps++
+				}
+			}
+			Expect(addGateOps).To(BeNumerically("<=", 1),
+				"expected at most 1 add-schedulingGates patch, got %d", addGateOps)
+			return
+		}
+
+		var patched corev1.Pod
+		Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
+
+		count := 0
+		for _, g := range patched.Spec.SchedulingGates {
+			if g.Name == utils.SchedulingGateName {
+				count++
+			}
+		}
+		Expect(count).To(BeNumerically("<=", 1),
+			"expected exactly 1 scheduling gate in patched pod, got %d — gates=%v",
 			count, patched.Spec.SchedulingGates)
-	}
-}
+	})
 
-// TestHandleAdmission_CELAppliedViaApplyCELInWebhook verifies that when a
-// matching PPC is supplied directly to applyCELInWebhook (bypassing the real
-// client.List), the resulting in-memory pod has the CEL architecture applied
-// before the gate is added — reproducing what Handle() does end-to-end.
-//
-// This test is effectively an integration test of the webhook's two main steps
-// (CEL apply → gate) in a single combined sequence, without needing a real
-// k8s API server.
-func TestHandleAdmission_CELAppliedViaApplyCELInWebhook(t *testing.T) {
-	ctx := context.Background()
-	recorder := record.NewFakeRecorder(8)
+	// TestHandleAdmission_CELAppliedViaApplyCELInWebhook
+	It("should apply CEL architecture constraints and add the scheduling gate in the correct order", func() {
+		ctx := context.Background()
+		recorder := record.NewFakeRecorder(8)
 
-	raw := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "test-wh",
-			Labels:    map[string]string{"app": "myapp"},
-		},
-		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	pod := newPod(raw, ctx, recorder)
+		raw := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-pod",
+				Namespace: "test-wh",
+				Labels:    map[string]string{"app": "myapp"},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		pod := newPod(raw, ctx, recorder)
 
-	// Simulate exactly what Handle() does: applyCELInWebhook then ensureSchedulingGate.
-	ppc := buildTestPPCWithCELRule("cel-ppc", "default", 100,
-		utils.ArchitectureAmd64,
-		`self.metadata.name == "my-pod"`,
-		utils.ArchitecturePpc64le)
+		ppc := buildTestPPCWithCELRule("cel-ppc", "default", 100,
+			utils.ArchitectureAmd64,
+			`self.metadata.name == "my-pod"`,
+			utils.ArchitecturePpc64le)
 
-	wh := &PodSchedulingGateMutatingWebHook{}
-	wh.applyCELInWebhook(ctx, pod, []v1beta1.PodPlacementConfig{ppc})
-	pod.ensureSchedulingGate()
+		wh := &PodSchedulingGateMutatingWebHook{}
+		wh.applyCELInWebhook(ctx, pod, []v1beta1.PodPlacementConfig{ppc})
+		pod.ensureSchedulingGate()
 
-	// 1. Architecture must be set.
-	if pod.Spec.Affinity == nil ||
-		pod.Spec.Affinity.NodeAffinity == nil ||
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		t.Fatal("expected node affinity to be set")
-	}
-	archFound := false
-	for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-		for _, expr := range term.MatchExpressions {
-			if expr.Key == utils.ArchLabel && len(expr.Values) == 1 && expr.Values[0] == utils.ArchitecturePpc64le {
-				archFound = true
+		Expect(pod.Spec.Affinity).NotTo(BeNil())
+		Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+		Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+		archFound := false
+		for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel && len(expr.Values) == 1 && expr.Values[0] == utils.ArchitecturePpc64le {
+					archFound = true
+				}
 			}
 		}
-	}
-	if !archFound {
-		t.Error("expected ppc64le architecture constraint, not found")
-	}
+		Expect(archFound).To(BeTrue(), "expected ppc64le architecture constraint, not found")
+		Expect(pod.HasSchedulingGate()).To(BeTrue(),
+			"expected scheduling gate to be present after ensureSchedulingGate")
+	})
+})
 
-	// 2. Scheduling gate must be present.
-	if !pod.HasSchedulingGate() {
-		t.Error("expected scheduling gate to be present after ensureSchedulingGate")
-	}
-}
+var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
+
+	// TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback
+	It("should NOT call apiReader when informer cache is synced and returns no PPCs", func() {
+		s := runtime.NewScheme()
+		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+		Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+		Expect(err).NotTo(HaveOccurred())
+
+		apiReaderCalled := false
+		var mockAPIReader mockReader
+		mockAPIReader.listFn = func() error {
+			apiReaderCalled = true
+			return nil
+		}
+
+		cacheSynced := func() bool { return true }
+		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+		Expect(apiReaderCalled).To(BeFalse(),
+			"apiReader should NOT be called when informer cache is synced and returned no PPCs")
+	})
+
+	// TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed
+	It("should call apiReader when informer cache is NOT yet synced", func() {
+		s := runtime.NewScheme()
+		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+		Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+		Expect(err).NotTo(HaveOccurred())
+
+		apiReaderCalled := false
+		var mockAPIReader mockReader
+		mockAPIReader.listFn = func() error {
+			apiReaderCalled = true
+			return nil
+		}
+
+		cacheSynced := func() bool { return false }
+		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+		Expect(apiReaderCalled).To(BeTrue(),
+			"apiReader SHOULD be called when informer cache is not yet synced and returned no PPCs")
+	})
+
+	// TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed
+	It("should call apiReader when ppcCacheSynced is nil (no informer wired)", func() {
+		s := runtime.NewScheme()
+		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+		Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+		Expect(err).NotTo(HaveOccurred())
+
+		apiReaderCalled := false
+		var mockAPIReader mockReader
+		mockAPIReader.listFn = func() error {
+			apiReaderCalled = true
+			return nil
+		}
+
+		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+		Expect(apiReaderCalled).To(BeTrue(),
+			"apiReader SHOULD be called when ppcCacheSynced is nil (no informer wired)")
+	})
+
+	// TestHandle_ApiReaderNil_NoFallback
+	It("should not panic and return Allowed=true when apiReader is nil", func() {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		}
+		wh := newHandleWebhook()
+		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true with nil apiReader, got: %v", resp.Result)
+	})
+})
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // applyJSONPatches applies a slice of JSON Patch operations to srcJSON using
 // a simple loop (no library needed for the patch ops produced by the webhook).
 func applyJSONPatches(srcJSON []byte, patches []jsonpatch.JsonPatchOperation) ([]byte, error) {
-	// The webhook produces RFC 6902 JSON Patch. We use encoding/json to
-	// unmarshal, modify, and re-marshal the object.
 	var obj map[string]interface{}
 	if err := json.Unmarshal(srcJSON, &obj); err != nil {
 		return nil, err
@@ -346,13 +384,12 @@ func applyJSONPatches(srcJSON []byte, patches []jsonpatch.JsonPatchOperation) ([
 }
 
 // applyJSONPatchOp applies a single RFC 6902 JSON Patch operation to the
-// provided map.  Only "add" and "replace" operations on simple "/" paths are
+// provided map. Only "add" and "replace" operations on simple "/" paths are
 // handled — sufficient for the patches generated by this webhook.
 func applyJSONPatchOp(obj map[string]interface{}, op jsonpatch.JsonPatchOperation) {
 	if op.Path == "" {
 		return
 	}
-	// Very simple path splitter: "/a/b/c" → ["a","b","c"]
 	parts := splitJSONPointer(op.Path)
 	if len(parts) == 0 {
 		return
@@ -383,7 +420,6 @@ func splitJSONPointer(path string) []string {
 }
 
 func unescapeJSONPointerToken(s string) string {
-	// RFC 6901 escape sequences: ~1 → /, ~0 → ~
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		if s[i] == '~' && i+1 < len(s) {
@@ -404,7 +440,6 @@ func unescapeJSONPointerToken(s string) string {
 }
 
 func escapeJSONPointer(s string) string {
-	// Invert of unescape for building pointer segments.
 	result := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -453,147 +488,6 @@ func buildTestPPCWithCELRule(name, ns string, priority uint8, fallback, expressi
 				},
 			},
 		},
-	}
-}
-
-// ── apiReader / ppcCacheSynced tests ────────────────────────────────────────
-
-// TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback verifies that when the
-// informer cache is marked synced AND returns no PPCs, the apiReader is NOT
-// consulted (no unnecessary API-server traffic after cache is warm).
-func TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback(t *testing.T) {
-	s := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := v1beta1.AddToScheme(s); err != nil {
-		t.Fatalf("add multiarch scheme: %v", err)
-	}
-
-	// fakeClient has no PPCs → List returns empty.
-	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-	if err != nil {
-		t.Fatalf("ants pool: %v", err)
-	}
-
-	apiReaderCalled := false
-	// mockReader is a spy that records whether it was called.
-	var mockAPIReader mockReader
-	mockAPIReader.listFn = func() error {
-		apiReaderCalled = true
-		return nil
-	}
-
-	// Cache reports synced.
-	cacheSynced := func() bool { return true }
-
-	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if apiReaderCalled {
-		t.Error("apiReader should NOT be called when informer cache is synced and returned no PPCs")
-	}
-}
-
-// TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed verifies that when
-// the informer cache reports NOT YET SYNCED and returns no PPCs, the apiReader
-// IS consulted (early startup protection).
-func TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed(t *testing.T) {
-	s := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := v1beta1.AddToScheme(s); err != nil {
-		t.Fatalf("add multiarch scheme: %v", err)
-	}
-
-	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-	if err != nil {
-		t.Fatalf("ants pool: %v", err)
-	}
-
-	apiReaderCalled := false
-	var mockAPIReader mockReader
-	mockAPIReader.listFn = func() error {
-		apiReaderCalled = true
-		return nil
-	}
-
-	// Cache reports NOT synced yet.
-	cacheSynced := func() bool { return false }
-
-	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !apiReaderCalled {
-		t.Error("apiReader SHOULD be called when informer cache is not yet synced and returned no PPCs")
-	}
-}
-
-// TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed verifies that when
-// ppcCacheSynced is nil (no informer wired), the apiReader fallback is still allowed.
-func TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed(t *testing.T) {
-	s := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(s); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
-	if err := v1beta1.AddToScheme(s); err != nil {
-		t.Fatalf("add multiarch scheme: %v", err)
-	}
-
-	fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-	pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-	if err != nil {
-		t.Fatalf("ants pool: %v", err)
-	}
-
-	apiReaderCalled := false
-	var mockAPIReader mockReader
-	mockAPIReader.listFn = func() error {
-		apiReaderCalled = true
-		return nil
-	}
-
-	// ppcCacheSynced = nil → always treat cache as not synced.
-	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	_ = wh.Handle(context.Background(), buildHandleRequest(t, pod))
-
-	if !apiReaderCalled {
-		t.Error("apiReader SHOULD be called when ppcCacheSynced is nil (no informer wired)")
-	}
-}
-
-// TestHandle_ApiReaderNil_NoFallback verifies that when apiReader is nil,
-// no fallback is attempted regardless of cache sync state.
-func TestHandle_ApiReaderNil_NoFallback(t *testing.T) {
-	// This test verifies the webhook does not panic and works correctly when
-	// apiReader is nil — the existing behavior that is already tested elsewhere.
-	// It is here for completeness alongside the new ppcCacheSynced tests.
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-	}
-	wh := newHandleWebhook(t) // already uses apiReader=nil
-	resp := wh.Handle(context.Background(), buildHandleRequest(t, pod))
-	if !resp.Allowed {
-		t.Fatalf("expected Allowed=true with nil apiReader, got: %v", resp.Result)
 	}
 }
 
