@@ -383,15 +383,18 @@ var _ = Describe("CEL Evaluator", func() {
 				false, []string{"amd64"}, true, "Should handle pod with empty name"),
 		)
 
-		It("should return errAllCELRulesErrored when all rules fail to compile", func() {
+		It("should treat all-errored rules as non-matching and return fallback with allRulesErrored=true", func() {
 			rules := []plugins.ArchitectureRule{
 				{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
 			}
 			fallback := []string{"amd64"}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
 			result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
-			Expect(err).To(MatchError(errAllCELRulesErrored))
-			Expect(result).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(BeNil())
+			Expect(result.allRulesErrored).To(BeTrue())
+			Expect(result.matched).To(BeFalse())
+			Expect(result.architectures).To(ConsistOf("amd64"))
 		})
 
 		It("should use fallback with empty rules and not set allErrored", func() {
@@ -1059,6 +1062,95 @@ var _ = Describe("CEL Evaluator", func() {
 			wrappedPod := newPod(pod, ctx, recorder)
 			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
 			Expect(wrappedPod.Labels[utils.NodeAffinityLabel]).To(Equal(utils.NodeAffinityLabelValueOverriden))
+		})
+	})
+
+	Describe("applyCELArchitecturePlacement – controller path", func() {
+		// These tests prove the intentional difference between the webhook and
+		// controller execution paths for malformed CEL:
+		//
+		//   malformed CEL → allRulesErrored=true → controller applies fallback
+		//
+		// (The webhook path is exercised in the "applyCELInWebhook" Describe block
+		// above, where allRulesErrored causes the PPC to be skipped entirely.)
+
+		It("should apply fallback architectures and return true when all CEL rules are malformed", func() {
+			// Construct a minimal PodReconciler; only the Recorder field is needed
+			// because applyCELArchitecturePlacement does not call the API server.
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := v1beta1.PodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "malformed-ppc", Namespace: "default"},
+				Spec: v1beta1.PodPlacementConfigSpec{
+					Plugins: &plugins.LocalPlugins{
+						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+							BasePlugin:            plugins.BasePlugin{Enabled: true},
+							FallbackArchitectures: []string{"amd64"},
+							Rules: []plugins.ArchitectureRule{
+								{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
+							},
+						},
+					},
+				},
+			}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"}}
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+
+			// The controller must apply the fallback and signal that it handled the pod.
+			Expect(handled).To(BeTrue(), "controller must apply fallback when all CEL rules are malformed")
+			Expect(wrappedPod.Spec.Affinity).NotTo(BeNil())
+			Expect(wrappedPod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+			var archValues []string
+			for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel {
+						archValues = append(archValues, expr.Values...)
+					}
+				}
+			}
+			Expect(archValues).To(ConsistOf("amd64"),
+				"NodeAffinity must contain the fallback architecture, not ppc64le from the malformed rule")
+		})
+
+		It("should NOT apply fallback in webhook when all CEL rules are malformed (contrast with controller)", func() {
+			// This test documents that the two callers intentionally diverge:
+			//   webhook  → allRulesErrored → skip PPC, no NodeAffinity written
+			//   controller → allRulesErrored → apply fallback, NodeAffinity written
+			recorder := record.NewFakeRecorder(8)
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"}}
+			ppcs := []v1beta1.PodPlacementConfig{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "malformed-ppc", Namespace: "default"},
+					Spec: v1beta1.PodPlacementConfigSpec{
+						Priority: 100,
+						Plugins: &plugins.LocalPlugins{
+							CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+								BasePlugin:            plugins.BasePlugin{Enabled: true},
+								FallbackArchitectures: []string{"amd64"},
+								Rules: []plugins.ArchitectureRule{
+									{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
+								},
+							},
+						},
+					},
+				},
+			}
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, context.Background(), recorder)
+			wh.applyCELInWebhook(context.Background(), wrappedPod, ppcs)
+
+			// Webhook must NOT have written any NodeAffinity for the malformed PPC.
+			if wrappedPod.Spec.Affinity != nil && wrappedPod.Spec.Affinity.NodeAffinity != nil {
+				req := wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+				if req != nil {
+					Expect(req.NodeSelectorTerms).To(BeEmpty(),
+						"webhook must not set NodeAffinity when the only PPC has all-malformed CEL rules")
+				}
+			}
 		})
 	})
 })

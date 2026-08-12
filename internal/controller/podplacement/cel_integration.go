@@ -55,6 +55,16 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 		return false
 	}
 
+	if result.allRulesErrored {
+		// Every CEL expression in this PPC is malformed.
+		// The evaluator returned the fallback architectures in result.architectures.
+		// Controller reconciliation applies the fallback (unlike webhook admission,
+		// which skips a malformed PPC so lower-priority PPCs can claim the pod).
+		log.V(1).Info("All CEL rules in PPC failed to evaluate (malformed); applying fallback architectures",
+			"PodPlacementConfig", ppc.Name, "pod", pod.Name,
+			"fallbackArchitectures", result.architectures)
+	}
+
 	if result.matched {
 		log.V(2).Info("CEL rule matched, applying architecture constraints",
 			"PodPlacementConfig", ppc.Name,

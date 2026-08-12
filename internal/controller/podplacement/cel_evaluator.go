@@ -191,8 +191,7 @@ func (e *celEvaluator) evaluate(expression string, pod *corev1.Pod) (bool, error
 //   - matched=true:  a rule evaluated successfully to true → use its architectures
 //   - matched=false, allErrored=false: all rules evaluated to false → use fallback
 //   - matched=false, allErrored=true:  every rule failed to compile or evaluate
-//     (the PPC's CEL configuration is malformed) → skip this PPC entirely;
-//     do NOT apply fallback, do NOT claim the Pod
+//     (the PPC's CEL configuration is malformed); the caller decides what to do
 type rulesEvalResult struct {
 	architectures []string
 	ruleName      string
@@ -254,15 +253,24 @@ type evaluateResult struct {
 	architectures []string
 	ruleName      string
 	matched       bool
+	// allRulesErrored is true when every rule in the PPC failed to compile or
+	// evaluate.  The evaluator returns the fallback architectures in this case.
+	// Callers decide how to handle the malformed PPC:
+	//   - webhook admission skips it so lower-priority PPCs can be evaluated;
+	//   - controller reconciliation applies the fallback.
+	allRulesErrored bool
 }
 
 // evaluateCELArchitecturePlacement evaluates the celArchitecturePlacement plugin rules.
 // Returns the architectures to apply and whether a rule matched, or an error when the
 // evaluator itself cannot be initialized.
 //
-// When all rules in the PPC are malformed (compile / evaluation errors), returns
-// errAllCELRulesErrored so the caller can skip this PPC without applying fallback.
-// Uses a package-level evaluator for expression caching across pod evaluations.
+// When all rules in the PPC are malformed (compile / evaluation errors), returns a
+// result with allRulesErrored=true and the fallback architectures.  How the caller
+// handles this condition depends on the execution path: the webhook skips the PPC so
+// lower-priority PPCs can still claim the pod, while the controller applies the
+// fallback.  Uses a package-level evaluator for expression caching across pod
+// evaluations.
 func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallbackArchitectures []string, pod *corev1.Pod) (*evaluateResult, error) {
 	if rules == nil && fallbackArchitectures == nil {
 		return nil, fmt.Errorf("both rules and fallbackArchitectures are nil")
@@ -278,11 +286,14 @@ func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallback
 	rr := evaluator.evaluateRules(rules, pod)
 
 	if rr.allErrored {
-		// Every rule in this PPC failed to compile or evaluate.  Returning an
-		// error here signals to the caller (applyCELInWebhook / applyCELArchitecturePlacement)
-		// to skip this PPC rather than applying fallback — a malformed PPC must
-		// not claim the Pod and must not block lower-priority PPCs.
-		return nil, errAllCELRulesErrored
+		// Every rule in this PPC failed to compile or evaluate.
+		// Return fallback architectures and signal the condition via allRulesErrored=true
+		// so callers can decide how to handle it without blocking pod admission.
+		return &evaluateResult{
+			architectures:   fallbackArchitectures,
+			matched:         false,
+			allRulesErrored: true,
+		}, nil
 	}
 
 	if rr.matched {
@@ -301,11 +312,6 @@ func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallback
 		matched:       false,
 	}, nil
 }
-
-// errAllCELRulesErrored is returned by evaluateCELArchitecturePlacement when
-// every rule in a PPC fails to compile or evaluate.  Callers must skip the PPC
-// rather than applying its fallback architectures.
-var errAllCELRulesErrored = fmt.Errorf("all CEL rules in PPC failed to evaluate (malformed expressions); PPC skipped")
 
 // validateCELExpression validates a CEL expression without evaluating it
 // This can be used for validation at admission time

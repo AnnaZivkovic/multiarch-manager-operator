@@ -19,6 +19,7 @@ package plugins
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
@@ -27,6 +28,58 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
+
+var (
+	// validationEnv is the package-level typed CEL environment used by
+	// ValidateCELExpressions. It is created once and reused across all webhook
+	// calls to avoid rebuilding the environment (and recompiling all expressions)
+	// on every admission request, which would exceed the Kubernetes webhook
+	// timeout when a PPC contains hundreds of rules.
+	validationEnv    *cel.Env
+	validationEnvErr error
+	validationOnce   sync.Once
+)
+
+// getOrCreateValidationEnv returns the shared typed CEL validation environment,
+// creating it on the first call. Subsequent calls return the cached result.
+// If initialisation fails the first time, every subsequent call returns the
+// same error (same design as getOrCreateEvaluator in cel_evaluator.go).
+func getOrCreateValidationEnv() (*cel.Env, error) {
+	validationOnce.Do(func() {
+		tp, err := podValidationTypeProvider()
+		if err != nil {
+			validationEnvErr = fmt.Errorf("failed to create pod type provider: %w", err)
+			return
+		}
+
+		baseEnv, err := cel.NewEnv()
+		if err != nil {
+			validationEnvErr = fmt.Errorf("failed to create base CEL environment: %w", err)
+			return
+		}
+
+		envOpts, err := tp.EnvOptions(baseEnv.CELTypeProvider())
+		if err != nil {
+			validationEnvErr = fmt.Errorf("failed to build CEL environment options from type provider: %w", err)
+			return
+		}
+
+		envOpts = append(envOpts, cel.Variable("self", cel.ObjectType("pod")))
+
+		env, err := cel.NewEnv(envOpts...)
+		if err != nil {
+			validationEnvErr = fmt.Errorf("failed to create CEL environment: %w", err)
+			return
+		}
+
+		validationEnv = env
+	})
+
+	if validationEnvErr != nil {
+		return nil, validationEnvErr
+	}
+	return validationEnv, nil
+}
 
 // +kubebuilder:object:generate=true
 
@@ -176,28 +229,13 @@ func podValidationTypeProvider() (*apiservercel.DeclTypeProvider, error) {
 // evaluates against podToMap() data — it never validates schema and never
 // exposes spec/status.
 func (c *CelArchitecturePlacement) ValidateCELExpressions() error {
-	tp, err := podValidationTypeProvider()
+	// Reuse the package-level typed CEL environment. Building the environment
+	// from scratch on every webhook call is too expensive when a PPC has
+	// hundreds of rules: on a CI runner 500+ compilations easily exceed the
+	// Kubernetes webhook admission timeout of 10 s.
+	env, err := getOrCreateValidationEnv()
 	if err != nil {
-		return fmt.Errorf("failed to create pod type provider: %w", err)
-	}
-
-	// Build a base environment to obtain its type provider, which is required
-	// by DeclTypeProvider.EnvOptions to compose typed and built-in types.
-	baseEnv, err := cel.NewEnv()
-	if err != nil {
-		return fmt.Errorf("failed to create base CEL environment: %w", err)
-	}
-
-	envOpts, err := tp.EnvOptions(baseEnv.CELTypeProvider())
-	if err != nil {
-		return fmt.Errorf("failed to build CEL environment options from type provider: %w", err)
-	}
-
-	envOpts = append(envOpts, cel.Variable("self", cel.ObjectType("pod")))
-
-	env, err := cel.NewEnv(envOpts...)
-	if err != nil {
-		return fmt.Errorf("failed to create CEL environment: %w", err)
+		return err
 	}
 
 	for _, rule := range c.Rules {

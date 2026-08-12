@@ -234,8 +234,18 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 		// Evaluate CEL rules against the pod
 		result, err := evaluateCELArchitecturePlacement(celPlugin.Rules, celPlugin.FallbackArchitectures, pod.PodObject())
 		if err != nil {
-			// Log error and continue to next PPC (soft failure - don't block pod admission)
+			// Evaluator initialisation failed (not a CEL expression error).
+			// Log and continue to next PPC — don't block pod admission.
 			log.Error(err, "Failed to evaluate CEL rules, trying next PPC", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+			continue
+		}
+
+		// allRulesErrored means every CEL expression in this PPC failed to compile
+		// or evaluate.  The PPC is malformed and must not claim the pod; proceed to
+		// lower-priority PPCs so they can still apply their constraints.
+		if result.allRulesErrored {
+			log.V(1).Info("All CEL rules in PPC failed to evaluate (malformed); skipping PPC",
+				"PodPlacementConfig", ppc.Name, "pod", pod.Name)
 			continue
 		}
 
