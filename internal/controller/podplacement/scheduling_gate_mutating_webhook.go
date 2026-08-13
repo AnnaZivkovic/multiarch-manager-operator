@@ -249,17 +249,25 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 			continue
 		}
 
-		// Apply architecture constraints (removes existing constraints and sets new ones).
-		// If no architectures were produced (empty/nil result), do not treat this PPC as
-		// having handled the pod — continue to the next PPC so that a lower-priority PPC
-		// can still contribute constraints. This mirrors the controller behavior in
-		// applyCELArchitecturePlacement, which returns false when architectures is empty.
-		if !applyArchitectureConstraints(pod.PodObject(), result.architectures) {
+		// Apply architecture constraints in-place (no NodeSelectorTerms deletions).
+		// We use the same safe path as the reconciler's applyCELArchitecturePlacement:
+		//   1. Remove the arch key only from nodeSelector (flat map).
+		//   2. Update arch matchExpressions within each existing NodeSelectorTerm.
+		// This preserves the term count so that a subsequent controller Update never
+		// sends fewer terms than what was persisted here, avoiding the Kubernetes
+		// HTTP 422 "no additions/deletions to non-empty NodeSelectorTerms list are
+		// allowed" error (KEP-3838 immutability requirement).
+		// We deliberately do NOT call applyArchitectureConstraints (which calls
+		// removeAllArchitectureConstraints → removeArchitectureFromNodeAffinity)
+		// because that function drops arch-only terms, shrinking the term count.
+		if len(result.architectures) == 0 {
 			log.V(1).Info("CEL plugin produced no architectures; trying next PPC",
 				"pod", pod.Name,
 				"PodPlacementConfig", ppc.Name)
 			continue
 		}
+		removeArchitectureFromNodeSelector(pod.PodObject())
+		applyArchitectureNodeAffinity(pod.PodObject(), result.architectures)
 
 		// CEL successfully applied architecture constraints. Mark the pod so downstream
 		// components (e.g. reconciler, e2e tests) can distinguish CEL-placed pods from

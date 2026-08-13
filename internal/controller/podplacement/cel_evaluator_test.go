@@ -773,9 +773,9 @@ var _ = Describe("CEL Evaluator", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(prog1).To(BeIdenticalTo(prog2), "Expected cached program to be reused")
 
-			evaluator.mu.RLock()
-			_, found := evaluator.cache[expression]
-			evaluator.mu.RUnlock()
+			evaluator.mu.Lock()
+			found := evaluator.cache.Contains(expression)
+			evaluator.mu.Unlock()
 			Expect(found).To(BeTrue(), "Expression not found in cache")
 		})
 	})
@@ -1066,15 +1066,10 @@ var _ = Describe("CEL Evaluator", func() {
 	})
 
 	Describe("applyCELArchitecturePlacement – controller path", func() {
-		// These tests prove the intentional difference between the webhook and
-		// controller execution paths for malformed CEL:
-		//
-		//   malformed CEL → allRulesErrored=true → controller applies fallback
-		//
-		// (The webhook path is exercised in the "applyCELInWebhook" Describe block
-		// above, where allRulesErrored causes the PPC to be skipped entirely.)
+		// Both webhook and controller skip PPCs when all CEL rules fail:
+		//   malformed CEL → allRulesErrored=true → skip PPC, do not apply fallback
 
-		It("should apply fallback architectures and return true when all CEL rules are malformed", func() {
+		It("should skip PPC and return false when all CEL rules are malformed", func() {
 			// Construct a minimal PodReconciler; only the Recorder field is needed
 			// because applyCELArchitecturePlacement does not call the API server.
 			recorder := record.NewFakeRecorder(8)
@@ -1099,27 +1094,20 @@ var _ = Describe("CEL Evaluator", func() {
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
 
-			// The controller must apply the fallback and signal that it handled the pod.
-			Expect(handled).To(BeTrue(), "controller must apply fallback when all CEL rules are malformed")
-			Expect(wrappedPod.Spec.Affinity).NotTo(BeNil())
-			Expect(wrappedPod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
-			Expect(wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
-			var archValues []string
-			for _, term := range wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				for _, expr := range term.MatchExpressions {
-					if expr.Key == utils.ArchLabel {
-						archValues = append(archValues, expr.Values...)
-					}
+			// The controller must NOT apply the fallback; skip the malformed PPC.
+			Expect(handled).To(BeFalse(), "controller must skip malformed PPC without applying fallback")
+			// Pod should have no affinity set by this PPC.
+			if wrappedPod.Spec.Affinity != nil && wrappedPod.Spec.Affinity.NodeAffinity != nil {
+				req := wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+				if req != nil {
+					Expect(req.NodeSelectorTerms).To(BeEmpty(),
+						"controller must not set NodeAffinity when all CEL rules are malformed")
 				}
 			}
-			Expect(archValues).To(ConsistOf("amd64"),
-				"NodeAffinity must contain the fallback architecture, not ppc64le from the malformed rule")
 		})
 
-		It("should NOT apply fallback in webhook when all CEL rules are malformed (contrast with controller)", func() {
-			// This test documents that the two callers intentionally diverge:
-			//   webhook  → allRulesErrored → skip PPC, no NodeAffinity written
-			//   controller → allRulesErrored → apply fallback, NodeAffinity written
+		It("should skip malformed PPC in both webhook and controller", func() {
+			// Both code paths uniformly skip PPCs with all-malformed CEL rules.
 			recorder := record.NewFakeRecorder(8)
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"}}
 			ppcs := []v1beta1.PodPlacementConfig{

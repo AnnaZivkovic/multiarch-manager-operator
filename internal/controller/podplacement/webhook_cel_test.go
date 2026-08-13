@@ -392,4 +392,94 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 		}
 		Expect(archFound).To(BeTrue(), "Architecture constraint not found after controller re-application")
 	})
+
+	// TestApplyCELInWebhook_KEP3838_ArchOnlyTermPreserved
+	// Regression test for the root cause of the integration failure:
+	// a 2-term pod (arch-only term + zone term) must keep both terms after the
+	// webhook fires so the controller's subsequent Update does not send fewer
+	// terms than what was persisted, which would be rejected with HTTP 422
+	// ("no additions/deletions to non-empty NodeSelectorTerms list are allowed",
+	// KEP-3838 immutability requirement).
+	It("should preserve both NodeSelectorTerms when one term is arch-only (KEP-3838 webhook regression)", func() {
+		ctx := context.Background()
+		recorder := record.NewFakeRecorder(10)
+
+		// Pod with 2 terms: Term 1 = arch-only, Term 2 = zone-only.
+		// This mirrors the exact scenario from the failing integration test.
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "kep3838-webhook-pod", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Affinity: &corev1.Affinity{
+					NodeAffinity: &corev1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{
+									// Term 1: arch-only — must NOT be dropped
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
+									},
+								},
+								{
+									// Term 2: zone constraint — must be preserved
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		matchingPPCs := []v1beta1.PodPlacementConfig{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "kep3838-ppc", Namespace: "default"},
+				Spec: v1beta1.PodPlacementConfigSpec{
+					Priority: 100,
+					Plugins: &plugins.LocalPlugins{
+						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+							BasePlugin:            plugins.BasePlugin{Enabled: true},
+							FallbackArchitectures: []string{utils.ArchitecturePpc64le},
+							Rules: []plugins.ArchitectureRule{
+								{Name: "always-true", Expression: `true`, Architectures: []string{utils.ArchitecturePpc64le}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		wh := &PodSchedulingGateMutatingWebHook{}
+		podWrapper := newPod(pod, ctx, recorder)
+		wh.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+		terms := podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+		Expect(terms).To(HaveLen(2),
+			"webhook must NOT shrink NodeSelectorTerms (KEP-3838): expected 2 terms, got %d — "+
+				"this would cause a Kubernetes HTTP 422 on the controller Update", len(terms))
+
+		// Verify architecture was updated to ppc64le in BOTH terms
+		for i, term := range terms {
+			found := false
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel {
+					found = true
+					Expect(expr.Values).To(ConsistOf(utils.ArchitecturePpc64le),
+						"term[%d]: expected ppc64le architecture, got %v", i, expr.Values)
+				}
+			}
+			Expect(found).To(BeTrue(), "term[%d]: architecture constraint missing after webhook applied", i)
+		}
+
+		// Verify zone is preserved in term 1 (index 1 = original zone-only term)
+		zoneFound := false
+		for _, expr := range terms[1].MatchExpressions {
+			if expr.Key == "topology.kubernetes.io/zone" {
+				zoneFound = true
+				Expect(expr.Values).To(ConsistOf("us-east-1a"), "zone value was modified")
+			}
+		}
+		Expect(zoneFound).To(BeTrue(), "zone constraint was removed from the zone term — must be preserved")
+	})
 })

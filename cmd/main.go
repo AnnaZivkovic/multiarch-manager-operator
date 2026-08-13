@@ -271,34 +271,42 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		ants.Release()
 	})
 
-	// ppcCacheSynced is a lazy, once-resolved function that returns the
-	// HasSynced state of the PodPlacementConfig informer.
-	// The informer can only be fetched after the manager cache has started,
-	// so we resolve it on the first call rather than at registration time.
-	// Until the informer is resolved, the function returns false (not yet synced),
-	// which keeps the apiReader fallback enabled — the safe default at startup.
+	// ppcCacheSynced returns true once the PodPlacementConfig informer cache has
+	// completed its initial list/sync.
+	//
+	// GetInformerForKind can fail if the manager cache has not yet started (e.g.,
+	// the first call arrives before the leader-elected manager is ready).  We retry
+	// on every call — once the informer is successfully obtained we short-circuit by
+	// caching the HasSynced func in ppcHasSynced.  This avoids a permanent fallback
+	// that would occur if sync.Once captured a transient startup error.
 	var (
-		ppcHasSynced func() bool
-		ppcOnce      sync.Once
+		ppcHasSynced     func() bool
+		ppcHasSyncedOnce sync.Mutex
 	)
 	ppcCacheSynced := func() bool {
-		ppcOnce.Do(func() {
-			informer, err := mgr.GetCache().GetInformerForKind(
-				context.Background(),
-				multiarchv1beta1.GroupVersion.WithKind(multiarchv1beta1.PodPlacementConfigKind),
-			)
-			if err != nil {
-				// If the informer cannot be obtained, treat cache as not synced
-				// so that the apiReader fallback remains enabled.
-				setupLog.Error(err, "failed to get PodPlacementConfig informer for cache sync check; apiReader fallback will remain active")
-				return
-			}
-			ppcHasSynced = informer.HasSynced
-		})
-		if ppcHasSynced == nil {
+		ppcHasSyncedOnce.Lock()
+		local := ppcHasSynced
+		ppcHasSyncedOnce.Unlock()
+		if local != nil {
+			return local()
+		}
+		// Informer not yet obtained — try to get it.
+		informer, err := mgr.GetCache().GetInformerForKind(
+			context.Background(),
+			multiarchv1beta1.GroupVersion.WithKind(multiarchv1beta1.PodPlacementConfigKind),
+		)
+		if err != nil {
+			// Transient failure: cache may not be started yet.
+			// Return false so apiReader fallback remains active; retry next call.
+			setupLog.V(1).Info("PodPlacementConfig informer not yet available; retrying on next call",
+				"error", err)
 			return false
 		}
-		return ppcHasSynced()
+		// Persist the resolved HasSynced function so future calls skip GetInformerForKind.
+		ppcHasSyncedOnce.Lock()
+		ppcHasSynced = informer.HasSynced
+		ppcHasSyncedOnce.Unlock()
+		return informer.HasSynced()
 	}
 
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),

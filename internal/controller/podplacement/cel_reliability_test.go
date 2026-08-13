@@ -266,9 +266,9 @@ var _ = Describe("CEL Reliability", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(prog1).To(BeIdenticalTo(prog2), "Expected cached program to be reused, but got different instance")
 
-		evaluator.mu.RLock()
-		_, found := evaluator.cache[expression]
-		evaluator.mu.RUnlock()
+		evaluator.mu.Lock()
+		found := evaluator.cache.Contains(expression)
+		evaluator.mu.Unlock()
 		Expect(found).To(BeTrue(), "Expression not found in cache")
 	})
 

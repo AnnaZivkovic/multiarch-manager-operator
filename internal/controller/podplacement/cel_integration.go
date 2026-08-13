@@ -57,12 +57,11 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 
 	if result.allRulesErrored {
 		// Every CEL expression in this PPC is malformed.
-		// The evaluator returned the fallback architectures in result.architectures.
-		// Controller reconciliation applies the fallback (unlike webhook admission,
-		// which skips a malformed PPC so lower-priority PPCs can claim the pod).
-		log.V(1).Info("All CEL rules in PPC failed to evaluate (malformed); applying fallback architectures",
-			"PodPlacementConfig", ppc.Name, "pod", pod.Name,
-			"fallbackArchitectures", result.architectures)
+		// Do not apply the fallback — return false so that lower-priority PPCs
+		// can still claim the pod (mirrors the webhook's applyCELInWebhook behaviour).
+		log.V(1).Info("All CEL rules in PPC failed to evaluate (malformed); skipping PPC",
+			"PodPlacementConfig", ppc.Name, "pod", pod.Name)
+		return false
 	}
 
 	if result.matched {
@@ -78,16 +77,24 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 			"architectures", result.architectures)
 	}
 
-	// Remove existing architecture constraints and apply new ones.
+	// Apply architecture constraints in-place (no NodeSelectorTerms deletions).
 	// If no architectures were produced (empty/nil result), do not claim the plugin
 	// applied — fall through to image-based detection so the pod is not ungated
 	// without any architecture constraint.
-	if !applyArchitectureConstraints(pod.PodObject(), result.architectures) {
+	//
+	// We use applyArchitectureNodeAffinity (not applyArchitectureConstraints) so that
+	// the reconciler never deletes NodeSelectorTerms.  KEP-3838 forbids adding or
+	// removing terms via an Update on a Pod that already has a non-empty
+	// NodeSelectorTerms list; the webhook has already persisted the correct term
+	// count, so here we only update matchExpressions within each existing term.
+	if len(result.architectures) == 0 {
 		log.V(1).Info("CEL plugin produced no architectures; skipping",
 			"PodPlacementConfig", ppc.Name, "pod", pod.Name,
 			"fallbackArchitectures", result.architectures)
 		return false
 	}
+	removeArchitectureFromNodeSelector(pod.PodObject())
+	applyArchitectureNodeAffinity(pod.PodObject(), result.architectures)
 
 	// CEL successfully applied architecture constraints. Mark the pod so downstream
 	// components (e.g. reconciler, e2e tests) can distinguish CEL-placed pods from

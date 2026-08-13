@@ -423,11 +423,11 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 			},
 			expectError: false,
 		},
-		// Anna's review: typed DeclTypeProvider rejects invalid metadata field names at
+		// Typed DeclTypeProvider rejects invalid metadata field names at
 		// admission/compile time.  "labells" is a typo for "labels" and must be rejected
 		// because the typed schema only defines "labels", not "labells".
 		{
-			name: "self.metadata.labells typo is rejected by typed schema (Anna review)",
+			name: "self.metadata.labells typo is rejected by typed schema",
 			rules: []ArchitectureRule{
 				{
 					Name:          "typo-rule",

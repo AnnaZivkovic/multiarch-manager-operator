@@ -23,16 +23,22 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	lru "github.com/hashicorp/golang-lru/v2/simplelru"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 )
 
+// celExpressionCacheSize is the maximum number of compiled CEL programs retained
+// in the LRU cache.  Each compiled program is a few KB; 1024 entries caps memory
+// at a few MB even with many PPC revisions over the operator lifetime.
+const celExpressionCacheSize = 1024
+
 // celEvaluator handles CEL expression compilation, caching, and evaluation
 type celEvaluator struct {
 	env   *cel.Env
-	cache map[string]cel.Program
-	mu    sync.RWMutex
+	cache *lru.LRU[string, cel.Program]
+	mu    sync.Mutex
 }
 
 var (
@@ -67,23 +73,29 @@ func newCELEvaluator() (*celEvaluator, error) {
 		return nil, fmt.Errorf("failed to create CEL environment: %w", err)
 	}
 
+	cache, err := lru.NewLRU[string, cel.Program](celExpressionCacheSize, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CEL expression LRU cache: %w", err)
+	}
+
 	return &celEvaluator{
 		env:   env,
-		cache: make(map[string]cel.Program),
+		cache: cache,
 	}, nil
 }
 
-// compile compiles a CEL expression and caches the result
+// compile compiles a CEL expression and caches the result.
+// simplelru.LRU is not thread-safe; all cache access is serialised through e.mu.
 func (e *celEvaluator) compile(expression string) (cel.Program, error) {
-	// Check cache first (read lock)
-	e.mu.RLock()
-	if prog, found := e.cache[expression]; found {
-		e.mu.RUnlock()
+	// Check cache first (fast path: hold lock only for the map lookup).
+	e.mu.Lock()
+	if prog, found := e.cache.Get(expression); found {
+		e.mu.Unlock()
 		return prog, nil
 	}
-	e.mu.RUnlock()
+	e.mu.Unlock()
 
-	// Compile expression
+	// Compile expression (lock-free: env.Compile is stateless and reentrant).
 	ast, issues := e.env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("CEL compilation error: %w", issues.Err())
@@ -100,9 +112,9 @@ func (e *celEvaluator) compile(expression string) (cel.Program, error) {
 		return nil, fmt.Errorf("failed to create CEL program: %w", err)
 	}
 
-	// Cache the compiled program (write lock)
+	// Store the compiled program in the LRU cache (evicts oldest when full).
 	e.mu.Lock()
-	e.cache[expression] = prog
+	e.cache.Add(expression, prog)
 	e.mu.Unlock()
 
 	return prog, nil
@@ -254,10 +266,9 @@ type evaluateResult struct {
 	ruleName      string
 	matched       bool
 	// allRulesErrored is true when every rule in the PPC failed to compile or
-	// evaluate.  The evaluator returns the fallback architectures in this case.
-	// Callers decide how to handle the malformed PPC:
-	//   - webhook admission skips it so lower-priority PPCs can be evaluated;
-	//   - controller reconciliation applies the fallback.
+	// evaluate.  Both the webhook and the controller skip the malformed PPC
+	// (return false) so that lower-priority PPCs can still claim the pod.
+	// The fallback architectures of the malformed PPC are never applied.
 	allRulesErrored bool
 }
 
@@ -266,10 +277,9 @@ type evaluateResult struct {
 // evaluator itself cannot be initialized.
 //
 // When all rules in the PPC are malformed (compile / evaluation errors), returns a
-// result with allRulesErrored=true and the fallback architectures.  How the caller
-// handles this condition depends on the execution path: the webhook skips the PPC so
-// lower-priority PPCs can still claim the pod, while the controller applies the
-// fallback.  Uses a package-level evaluator for expression caching across pod
+// result with allRulesErrored=true.  Both the webhook and the controller treat this
+// as a skip: the malformed PPC is not applied and lower-priority PPCs can still
+// claim the pod.  Uses a package-level evaluator for expression caching across pod
 // evaluations.
 func evaluateCELArchitecturePlacement(rules []plugins.ArchitectureRule, fallbackArchitectures []string, pod *corev1.Pod) (*evaluateResult, error) {
 	if rules == nil && fallbackArchitectures == nil {

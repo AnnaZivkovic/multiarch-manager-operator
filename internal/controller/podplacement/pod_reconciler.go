@@ -161,12 +161,15 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
-	// Skip preferred affinity processing if the user has already configured architecture-related preferred affinity
-	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
-	celApplied := false
-	if !pod.isPreferredAffinityConfiguredForArchitecture() {
-		celApplied = r.applyMatchingPPCs(ctx, matchingPPCs, pod)
+	// Always evaluate CEL architecture placement (required affinity) regardless of whether
+	// the pod already has user-defined preferred architecture affinity.
+	// NodeAffinityScoring (preferred affinity) is still skipped when the pod has
+	// user-defined preferred arch affinity, because adding more preferred terms on top of
+	// user-defined ones would interfere with user intent.
+	hasPreferredAffinityAtStart := pod.isPreferredAffinityConfiguredForArchitecture()
+	celApplied := r.applyMatchingPPCs(ctx, matchingPPCs, pod, hasPreferredAffinityAtStart)
 
+	if !hasPreferredAffinityAtStart {
 		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
 			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
 		}
@@ -232,7 +235,12 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 // applyMatchingPPCs applies the pre-filtered matching PodPlacementConfigs to the pod.
 // The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
 // Returns true if CEL architecture placement was applied, false otherwise.
-func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []multiarchv1beta1.PodPlacementConfig, pod *Pod) bool {
+//
+// CEL architecture placement (required affinity) always runs so that the Required
+// constraint is applied even when the pod has user-defined preferred arch affinity.
+// NodeAffinityScoring (preferred affinity) is only applied when the pod does NOT
+// already have user-defined preferred arch affinity, to preserve user intent.
+func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []multiarchv1beta1.PodPlacementConfig, pod *Pod, hasPreferredAffinityAtStart bool) bool {
 	log := ctrllog.FromContext(ctx).WithName("PodPlacementConfig")
 
 	// Sort the configurations by descending priority
@@ -253,8 +261,13 @@ func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []mu
 		}
 	}
 
-	// For each matching namespace-scoped configuration, apply NodeAffinityScoring if plugin is enabled
-	// This allows NodeAffinityScoring to coexist with celArchitecturePlacement per enhancement doc
+	// For each matching namespace-scoped configuration, apply NodeAffinityScoring if plugin is enabled.
+	// This allows NodeAffinityScoring to coexist with celArchitecturePlacement per enhancement doc.
+	// Skip if the pod already has user-defined preferred arch affinity to avoid overriding user intent.
+	if hasPreferredAffinityAtStart {
+		log.V(2).Info("Pod already has preferred arch affinity; skipping PPC NodeAffinityScoring")
+		return celApplied
+	}
 	for _, ppc := range matchingPPCs {
 		log.V(1).Info("Processing PodPlacementConfig", "namespace", ppc.Namespace, "name", ppc.Name)
 
