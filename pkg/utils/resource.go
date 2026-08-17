@@ -3,11 +3,13 @@ package utils
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,11 +17,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	appsv1client "k8s.io/client-go/kubernetes/typed/apps/v1"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	operatorv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
 	"github.com/openshift/library-go/pkg/operator/resource/resourcehelper"
@@ -66,9 +70,9 @@ func ApplyResource(ctx context.Context, clientSet *kubernetes.Clientset, client 
 	obj client.Object) (client.Object, bool, error) {
 	switch t := obj.(type) {
 	case *appsv1.Deployment:
-		return resourceapply.ApplyDeployment(ctx, clientSet.AppsV1(), recorder, t, 0)
+		return applyDeployment(ctx, clientSet.AppsV1(), recorder, t)
 	case *appsv1.DaemonSet:
-		return resourceapply.ApplyDaemonSet(ctx, clientSet.AppsV1(), recorder, t, 0)
+		return applyDaemonSet(ctx, clientSet.AppsV1(), recorder, t)
 	case *corev1.Service:
 		return applyService(ctx, clientSet.CoreV1(), recorder, t)
 	case *admissionv1.MutatingWebhookConfiguration:
@@ -148,14 +152,55 @@ func DeleteResources(ctx context.Context, toDeleteRefs []ToDeleteRef) error {
 	return nil
 }
 
-// applyService is a copy of the original method from
-// https://github.com/openshift/library-go/blob/964bcb3f545c24f15294fd8ba914529bf4fe8c4d/pkg/operator/resource/resourceapply/core.go#L132
-// The original method updates the service only if either the selector or the service type change.
-// This method updates the service in any case. A better solution would be to use the spec hash on the service, but
-// since the api server will default some values (e.g. clusterIP), this method would continue to detect changes and
-// update the service always. Therefore, that logic is stripped for now and considered 'good/safe enough' as we handle
-// just a few services.
-// TODO[integration-tests]: integration tests for this function in a suite dedicated to this package
+// generations tracks the last-applied generation for each Deployment/DaemonSet using
+// the standard OpenShift operatorv1.GenerationStatus type and library-go helpers.
+// On pod restart the slice is empty, so the first reconcile always applies
+// (ExpectedDeploymentGeneration returns -1 when no entry is found).
+var (
+	generationsMu sync.Mutex
+	generations   []operatorv1.GenerationStatus
+)
+
+// applyDeployment wraps library-go's ApplyDeployment with generation tracking so that
+// the spec-hash skip path works correctly. Without tracking, passing expectedGeneration=0
+// disables the skip path entirely, causing an Update on every reconcile.
+func applyDeployment(ctx context.Context, client appsv1client.DeploymentsGetter, recorder events.Recorder,
+	required *appsv1.Deployment) (*appsv1.Deployment, bool, error) {
+	generationsMu.Lock()
+	expectedGen := resourcemerge.ExpectedDeploymentGeneration(required, generations)
+	generationsMu.Unlock()
+
+	result, modified, err := resourceapply.ApplyDeployment(ctx, client, recorder, required, expectedGen)
+
+	if err == nil && result != nil {
+		generationsMu.Lock()
+		resourcemerge.SetDeploymentGeneration(&generations, result)
+		generationsMu.Unlock()
+	}
+	return result, modified, err
+}
+
+// applyDaemonSet wraps library-go's ApplyDaemonSet with generation tracking.
+func applyDaemonSet(ctx context.Context, client appsv1client.DaemonSetsGetter, recorder events.Recorder,
+	required *appsv1.DaemonSet) (*appsv1.DaemonSet, bool, error) {
+	generationsMu.Lock()
+	expectedGen := resourcemerge.ExpectedDaemonSetGeneration(required, generations)
+	generationsMu.Unlock()
+
+	result, modified, err := resourceapply.ApplyDaemonSet(ctx, client, recorder, required, expectedGen)
+
+	if err == nil && result != nil {
+		generationsMu.Lock()
+		resourcemerge.SetDaemonSetGeneration(&generations, result)
+		generationsMu.Unlock()
+	}
+	return result, modified, err
+}
+
+// applyService compares the fields the operator manages (ports, selector, type) against the
+// existing Service and only issues an Update when they differ. Server-defaulted fields
+// (clusterIP, sessionAffinity, ipFamilies, etc.) are ignored to avoid unnecessary updates
+// that would trigger Owns() watch events and feed a reconciliation storm.
 func applyService(ctx context.Context, client v1.ServicesGetter, recorder events.Recorder,
 	requiredOriginal *corev1.Service) (*corev1.Service, bool, error) {
 	required := requiredOriginal.DeepCopy()
@@ -165,8 +210,6 @@ func applyService(ctx context.Context, client v1.ServicesGetter, recorder events
 		actual, err := client.Services(requiredCopy.Namespace).
 			Create(ctx, resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*corev1.Service),
 				metav1.CreateOptions{})
-		// The following method is not exported by the resource apply package and is flattened in the next rows
-		// reportCreateEvent(recorder, requiredCopy, err)
 		gvk := resourcehelper.GuessObjectGroupVersionKind(requiredCopy)
 		if err == nil {
 			recorder.Eventf(fmt.Sprintf("%sCreated", gvk.Kind), "Created %s because it was missing",
@@ -175,17 +218,19 @@ func applyService(ctx context.Context, client v1.ServicesGetter, recorder events
 			recorder.Warningf(fmt.Sprintf("%sCreateFailed", gvk.Kind), "Failed to create %s: %v",
 				resourcehelper.FormatResourceForCLIWithNamespace(requiredCopy), err)
 		}
-		// End flattened method reportCreateEvent
 		return actual, true, err
 	}
 	if err != nil {
 		return nil, false, err
 	}
+
+	if serviceSpecMatchesRequired(existing.Spec, required.Spec) {
+		return existing, false, nil
+	}
+
 	existingCopy := existing.DeepCopy()
 	existingCopy.Spec = required.Spec
 
-	// the following method is not exported by the resourceapply package and is flattened in the next rows
-	// reportUpdateEvent(recorder, required, err)
 	actual, err := client.Services(required.Namespace).Update(ctx, existingCopy, metav1.UpdateOptions{})
 	gvk := resourcehelper.GuessObjectGroupVersionKind(required)
 	if err != nil {
@@ -195,6 +240,51 @@ func applyService(ctx context.Context, client v1.ServicesGetter, recorder events
 		recorder.Eventf(fmt.Sprintf("%sUpdated", gvk.Kind), "Updated %s because it changed",
 			resourcehelper.FormatResourceForCLIWithNamespace(required))
 	}
-	// end flattened method reportUpdateEvent
 	return actual, true, err
+}
+
+// serviceSpecMatchesRequired compares only the fields the operator manages:
+// ports (name, protocol, port, targetPort), selector, and type.
+func serviceSpecMatchesRequired(existing, required corev1.ServiceSpec) bool {
+	if !equality.Semantic.DeepEqual(existing.Selector, required.Selector) {
+		return false
+	}
+	existingType := existing.Type
+	if len(existingType) == 0 {
+		existingType = corev1.ServiceTypeClusterIP
+	}
+	requiredType := required.Type
+	if len(requiredType) == 0 {
+		requiredType = corev1.ServiceTypeClusterIP
+	}
+	if existingType != requiredType {
+		return false
+	}
+	return servicePortsMatch(existing.Ports, required.Ports)
+}
+
+// servicePortsMatch compares the managed port fields, ignoring server-defaulted
+// fields like NodePort. Ports are compared positionally (buildService always
+// produces the same ordered list).
+func servicePortsMatch(existing, required []corev1.ServicePort) bool {
+	if len(existing) != len(required) {
+		return false
+	}
+	for i := range required {
+		existingProto := existing[i].Protocol
+		if len(existingProto) == 0 {
+			existingProto = corev1.ProtocolTCP
+		}
+		requiredProto := required[i].Protocol
+		if len(requiredProto) == 0 {
+			requiredProto = corev1.ProtocolTCP
+		}
+		if existing[i].Name != required[i].Name ||
+			existingProto != requiredProto ||
+			existing[i].Port != required[i].Port ||
+			existing[i].TargetPort != required[i].TargetPort {
+			return false
+		}
+	}
+	return true
 }
