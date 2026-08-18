@@ -736,6 +736,104 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			}).Should(Succeed(), "finalizer should be removed after cleanup")
 		})
 	})
+	Context("is handling the DaemonSet creation deferral when the ServiceAccount has no imagePullSecrets", func() {
+		BeforeEach(func() {
+			By("Creating the ClusterPodPlacementConfig with ExecFormatErrorMonitor enabled")
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).
+				WithExecFormatErrorMonitor(true).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+
+			By("Setting the pod placement deployments as ready")
+			for _, name := range []string{utils.PodPlacementControllerName, utils.PodPlacementWebhookName} {
+				Eventually(func(g Gomega) {
+					setDeploymentReady(name, g)
+				}).Should(Succeed(), "the deployment "+name+" should be ready")
+			}
+		})
+		AfterEach(func() {
+			By("Deleting the ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("should defer DaemonSet creation until the ServiceAccount has imagePullSecrets", func() {
+			By("Verifying the enoexec objects WITHOUT the DaemonSet are created (SA, RBAC, Deployment)")
+			Eventually(framework.ValidateCreation(k8sClient, ctx, framework.MainPlugin,
+				framework.EnoExecPluginDeployment, framework.EnoExecPluginDeploymentObjects)).
+				Should(Succeed(), "the enoexec deployment objects should be created")
+
+			By("Verifying the enoexec-event-daemon ServiceAccount exists but has no imagePullSecrets")
+			Eventually(func(g Gomega) {
+				sa := &corev1.ServiceAccount{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, sa)
+				g.Expect(err).NotTo(HaveOccurred(), "the enoexec-event-daemon SA should be created")
+				g.Expect(sa.ImagePullSecrets).To(BeEmpty(), "the SA should have no imagePullSecrets in envtest")
+			}).Should(Succeed(), "the SA should exist without imagePullSecrets")
+
+			By("Verifying the DaemonSet is NOT created yet (SA has no imagePullSecrets in envtest)")
+			Consistently(func(g Gomega) {
+				ds := &appsv1.DaemonSet{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, ds)
+				g.Expect(errors.IsNotFound(err)).To(BeTrue(), "the DaemonSet should not exist yet because the SA has no imagePullSecrets")
+			}, "1s", "100ms").Should(Succeed(), "the DaemonSet should remain absent while SA has no imagePullSecrets")
+
+			By("Simulating the OpenShift SA controller provisioning imagePullSecrets")
+			simulateSAImagePullSecretProvisioning(utils.EnoexecDaemonSet)
+
+			By("Verifying the DaemonSet is created after the SA has imagePullSecrets")
+			Eventually(func(g Gomega) {
+				ds := &appsv1.DaemonSet{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, ds)
+				g.Expect(err).NotTo(HaveOccurred(), "the DaemonSet should be created after SA has imagePullSecrets")
+			}).Should(Succeed(), "the DaemonSet should be created")
+		})
+		It("should include an existing DaemonSet without checking SA imagePullSecrets", func() {
+			By("Simulating the SA controller provisioning imagePullSecrets so the DaemonSet is created initially")
+			simulateSAImagePullSecretProvisioning(utils.EnoexecDaemonSet)
+
+			By("Waiting for the DaemonSet to be created")
+			Eventually(func(g Gomega) {
+				ds := &appsv1.DaemonSet{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, ds)
+				g.Expect(err).NotTo(HaveOccurred(), "the DaemonSet should be created")
+			}).Should(Succeed(), "the DaemonSet should be created after SA has imagePullSecrets")
+
+			By("Removing imagePullSecrets from the SA to verify the DaemonSet is not removed")
+			Eventually(func(g Gomega) {
+				sa := &corev1.ServiceAccount{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, sa)
+				g.Expect(err).NotTo(HaveOccurred())
+				sa.ImagePullSecrets = nil
+				err = k8sClient.Update(ctx, sa)
+				g.Expect(err).NotTo(HaveOccurred(), "failed to remove imagePullSecrets from SA")
+			}).Should(Succeed(), "imagePullSecrets should be removed from SA")
+
+			By("Verifying the DaemonSet still exists (skip path: SA check not needed for existing DaemonSet)")
+			Consistently(func(g Gomega) {
+				ds := &appsv1.DaemonSet{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, ds)
+				g.Expect(err).NotTo(HaveOccurred(), "the DaemonSet should continue to exist even without SA imagePullSecrets")
+			}, "1s", "100ms").Should(Succeed(), "the DaemonSet should remain when it already exists, regardless of SA imagePullSecrets")
+		})
+	})
 	Context("the webhook shoud deny PodPlacementConfig creation", func() {
 		It("when the ClusterPodPlacementConfig doesn't exist", func() {
 			By("Ensure the ClusterPodPlacementConfig doesn't exist")
@@ -1102,6 +1200,29 @@ func setDeploymentReady(name string, g Gomega) {
 	})
 }
 
+// simulateSAImagePullSecretProvisioning simulates the OpenShift SA controller behavior
+// by adding a fake imagePullSecret to the specified ServiceAccount.
+// In real OpenShift clusters, the SA controller auto-generates a dockercfg secret
+// and populates the SA's ImagePullSecrets field. In envtest, this doesn't happen,
+// so we need to simulate it for the DaemonSet creation to proceed.
+func simulateSAImagePullSecretProvisioning(saName string) {
+	Eventually(func(g Gomega) {
+		sa := &corev1.ServiceAccount{}
+		err := k8sClient.Get(ctx, crclient.ObjectKey{
+			Name:      saName,
+			Namespace: utils.Namespace(),
+		}, sa)
+		g.Expect(err).NotTo(HaveOccurred(), "failed to get ServiceAccount "+saName)
+		if len(sa.ImagePullSecrets) == 0 {
+			sa.ImagePullSecrets = []corev1.LocalObjectReference{
+				{Name: saName + "-dockercfg-fake"},
+			}
+			err = k8sClient.Update(ctx, sa)
+			g.Expect(err).NotTo(HaveOccurred(), "failed to update ServiceAccount "+saName+" with imagePullSecrets")
+		}
+	}).Should(Succeed(), "the ServiceAccount "+saName+" should have imagePullSecrets")
+}
+
 // validateReconcile
 // NOTE: this can be used only in integratoin tests as it changes the status of deployments
 func validateReconcile(pluginObjectsSet ...framework.PluginObjectsSet) {
@@ -1109,6 +1230,14 @@ func validateReconcile(pluginObjectsSet ...framework.PluginObjectsSet) {
 		Eventually(func(g Gomega) {
 			setDeploymentReady(name, g)
 		}).Should(Succeed(), "the deployment "+name+" should be ready")
+	}
+	// Simulate OpenShift SA controller by adding imagePullSecrets to the enoexec-event-daemon SA.
+	// Without this, the DaemonSet creation is deferred because envtest has no SA controller.
+	for _, pluginSet := range pluginObjectsSet {
+		if pluginSet == framework.ENoExecPlugin || pluginSet == framework.EnoExecPluginDaemonSet {
+			simulateSAImagePullSecretProvisioning(utils.EnoexecDaemonSet)
+			break
+		}
 	}
 	Eventually(framework.ValidateCreation(k8sClient, ctx, pluginObjectsSet...)).Should(Succeed(), "the ClusterPodPlacementConfig should be created")
 	By("The ClusterPodPlacementConfig is ready")
