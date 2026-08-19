@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Red Hat, Inc.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -497,6 +497,44 @@ var _ = Describe("CEL Evaluator", func() {
 			Entry("complex expression with OR logic",
 				"(has(self.metadata.labels.app) && self.metadata.labels.app == 'web') || (has(self.metadata.labels.tier) && self.metadata.labels.tier == 'backend')",
 				true, false, "Verify OR logic works correctly"),
+			// Index / bracket notation on fields not exposed by podToMap.
+			// self is the map returned by podToMap, which only has a "metadata" key.
+			// DynType: bracket access compiles; absent top-level key produces "no such key"
+			// at runtime, which evaluateWithMap converts to false (non-error).
+			Entry("index on self for absent top-level key evaluates to false",
+				"self['spec'] == 'anything'", false, false,
+				"DynType: self['spec'] bracket access on absent key evaluates to false, not error"),
+			// self.spec does not exist in podToMap; chained bracket access on a missing
+			// intermediate key also produces "no such key" → false at runtime.
+			Entry("chained bracket access through absent spec field evaluates to false",
+				"self.spec['nodeName'] == 'node-1'", false, false,
+				"DynType: self.spec['nodeName'] on absent spec key evaluates to false, not error"),
+			// self.metadata.labels exists, but the label key 'spec' is absent.
+			// Bracket access on an existing map with a missing key produces "no such key" → false.
+			Entry("bracket access on labels map for absent key evaluates to false",
+				"self.metadata.labels['spec'] == 'value'", false, false,
+				"DynType: self.metadata.labels['spec'] for absent label key evaluates to false, not error"),
+		)
+
+		DescribeTable("standalone index expressions are rejected at compile time",
+			// A bare bracket/index expression such as self['spec'] returns dyn, not bool.
+			// The compile() function rejects non-boolean output types, so expressions like
+			// these must never reach the evaluator.  Users must always wrap index access
+			// in a boolean comparison (e.g. self['spec'] == 'value') or an 'in' check.
+			func(expression string, description string) {
+				_, err := evaluator.compile(expression)
+				Expect(err).To(HaveOccurred(), description)
+				Expect(err.Error()).To(ContainSubstring("boolean"), description)
+			},
+			Entry("bare self['spec'] is non-boolean",
+				"self['spec']",
+				"bare bracket access on self returns dyn, not bool — must be rejected"),
+			Entry("bare self.spec['nodeName'] is non-boolean",
+				"self.spec['nodeName']",
+				"bare bracket access through absent field returns dyn, not bool — must be rejected"),
+			Entry("bare self.metadata.labels['spec'] is non-boolean",
+				"self.metadata.labels['spec']",
+				"bare bracket label access returns dyn, not bool — must be rejected"),
 		)
 	})
 
@@ -1068,6 +1106,145 @@ var _ = Describe("CEL Evaluator", func() {
 	Describe("applyCELArchitecturePlacement – controller path", func() {
 		// Both webhook and controller skip PPCs when all CEL rules fail:
 		//   malformed CEL → allRulesErrored=true → skip PPC, do not apply fallback
+
+		// ── disabled-plugin tests (mirrors cel_new_critical_tests_test.go webhook cases) ──
+
+		It("should return false and not modify the pod when the CEL plugin is disabled (Enabled: false)", func() {
+			// Verify the guard at cel_integration.go: !ppc.PluginsEnabled(...)
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := v1beta1.PodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
+				Spec: v1beta1.PodPlacementConfigSpec{
+					Priority: 100,
+					Plugins: &plugins.LocalPlugins{
+						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+							BasePlugin:            plugins.BasePlugin{Enabled: false},
+							FallbackArchitectures: []string{"ppc64le"},
+							Rules: []plugins.ArchitectureRule{
+								{Name: "always-true", Expression: `true`, Architectures: []string{"ppc64le"}},
+							},
+						},
+					},
+				},
+			}
+
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}}}
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+
+			Expect(handled).To(BeFalse(),
+				"controller must return false when CEL plugin is disabled")
+			Expect(wrappedPod.Spec.Affinity).To(BeNil(),
+				"controller must not set affinity when CEL plugin is disabled")
+		})
+
+		It("should not add architecture NodeAffinity when plugin is disabled", func() {
+			// No architecture constraint must be added; existing unrelated affinity unchanged.
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			existingTerm := corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+				},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-with-affinity", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Affinity: &corev1.Affinity{
+						NodeAffinity: &corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{existingTerm},
+							},
+						},
+					},
+				},
+			}
+
+			ppc := v1beta1.PodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
+				Spec: v1beta1.PodPlacementConfigSpec{
+					Plugins: &plugins.LocalPlugins{
+						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+							BasePlugin:            plugins.BasePlugin{Enabled: false},
+							FallbackArchitectures: []string{"ppc64le"},
+						},
+					},
+				},
+			}
+
+			wrappedPod := newPod(pod, context.Background(), recorder)
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+
+			Expect(handled).To(BeFalse(),
+				"controller must return false when CEL plugin is disabled")
+			// Existing affinity must be completely unchanged.
+			Expect(wrappedPod.Spec.Affinity).NotTo(BeNil(),
+				"existing affinity must not be removed by a disabled CEL plugin")
+			terms := wrappedPod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(1),
+				"NodeSelectorTerms count must be unchanged when plugin is disabled")
+			Expect(terms[0].MatchExpressions[0].Key).To(Equal("topology.kubernetes.io/zone"),
+				"existing affinity term was modified by a disabled CEL plugin")
+			// No arch label must have been injected.
+			for _, expr := range terms[0].MatchExpressions {
+				Expect(expr.Key).NotTo(Equal(utils.ArchLabel),
+					"controller must not inject arch constraint when plugin is disabled")
+			}
+		})
+
+		It("should not modify unrelated pod fields when plugin is disabled", func() {
+			// Labels, annotations, nodeSelector non-arch keys must survive unchanged.
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unrelated-fields-pod",
+					Namespace: "default",
+					Labels:    map[string]string{"app": "database", "tier": "backend"},
+					Annotations: map[string]string{
+						"custom-annotation": "custom-value",
+					},
+				},
+				Spec: corev1.PodSpec{
+					NodeSelector: map[string]string{"zone": "us-east-1"},
+				},
+			}
+
+			ppc := v1beta1.PodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
+				Spec: v1beta1.PodPlacementConfigSpec{
+					Plugins: &plugins.LocalPlugins{
+						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+							BasePlugin:            plugins.BasePlugin{Enabled: false},
+							FallbackArchitectures: []string{"ppc64le"},
+						},
+					},
+				},
+			}
+
+			wrappedPod := newPod(pod, context.Background(), recorder)
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+
+			Expect(handled).To(BeFalse())
+			Expect(wrappedPod.Labels["app"]).To(Equal("database"),
+				"label 'app' must be unchanged when plugin is disabled")
+			Expect(wrappedPod.Labels["tier"]).To(Equal("backend"),
+				"label 'tier' must be unchanged when plugin is disabled")
+			Expect(wrappedPod.Annotations["custom-annotation"]).To(Equal("custom-value"),
+				"annotation must be unchanged when plugin is disabled")
+			Expect(wrappedPod.Spec.NodeSelector["zone"]).To(Equal("us-east-1"),
+				"non-arch nodeSelector key 'zone' must be unchanged when plugin is disabled")
+			Expect(wrappedPod.Spec.Affinity).To(BeNil(),
+				"no affinity must be set when plugin is disabled")
+		})
+
+		// ── malformed-CEL tests ────────────────────────────────────────────────────
 
 		It("should skip PPC and return false when all CEL rules are malformed", func() {
 			// Construct a minimal PodReconciler; only the Recorder field is needed

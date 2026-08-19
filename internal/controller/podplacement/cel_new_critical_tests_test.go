@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Red Hat, Inc.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -48,29 +49,22 @@ var _ = Describe("CEL New Critical Tests", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		original := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-			},
-		}
+		original := NewPod().
+			WithName("test-pod").
+			WithNamespace("default").
+			WithContainersImages("nginx:latest").
+			Build()
 
 		ppcs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-cel-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-							Rules: []plugins.ArchitectureRule{
-								{Name: "always-true", Expression: `true`, Architectures: []string{utils.ArchitecturePpc64le}},
-							},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().
+				WithName("disabled-cel-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						{Name: "always-true", Expression: `true`, Architectures: []string{utils.ArchitecturePpc64le}},
+					}).
+				Build(),
 		}
 
 		wh := &PodSchedulingGateMutatingWebHook{}
@@ -243,6 +237,8 @@ var _ = Describe("CEL New Critical Tests", func() {
 	})
 
 	// TestApplyArchitectureConstraints_MatchFieldsPositionUnchanged
+	// Left as explicit struct: PodBuilder.WithNodeSelectorTermsMatchExpressions only sets
+	// MatchExpressions; it cannot represent the MatchFields field.
 	It("should not reorder or remove MatchFields entries during in-place update", func() {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "matchfields-pod"},
@@ -287,17 +283,13 @@ var _ = Describe("CEL New Critical Tests", func() {
 			"custom-annotation": "custom-value",
 		}
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        "metadata-pod",
-				Namespace:   "prod",
-				Labels:      copyStringMap(originalLabels),
-				Annotations: copyStringMap(originalAnnotations),
-			},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{utils.ArchLabel: "amd64", "zone": "us-east-1"},
-			},
-		}
+		pod := NewPod().
+			WithName("metadata-pod").
+			WithNamespace("prod").
+			WithLabels("app", "database", "tier", "backend", "managed-by", "helm", "version", "1.2.3").
+			WithAnnotations(copyStringMap(originalAnnotations)).
+			WithNodeSelectors(utils.ArchLabel, "amd64", "zone", "us-east-1").
+			Build()
 
 		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 
@@ -324,13 +316,11 @@ var _ = Describe("CEL New Critical Tests", func() {
 			APIVersion: "apps/v1", Kind: "Deployment", Name: "my-deploy",
 			UID: "uid-12345", Controller: &truePtr, BlockOwnerDeletion: &truePtr,
 		}
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:            "owned-pod",
-				Namespace:       "default",
-				OwnerReferences: []metav1.OwnerReference{ownerRef},
-			},
-		}
+		pod := NewPod().
+			WithName("owned-pod").
+			WithNamespace("default").
+			WithOwnerReference(ownerRef).
+			Build()
 
 		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 
@@ -342,6 +332,7 @@ var _ = Describe("CEL New Critical Tests", func() {
 	})
 
 	// TestApplyArchitectureConstraints_FinalizersPreserved
+	// Left as explicit struct: PodBuilder has no WithFinalizers method.
 	It("should leave finalizers untouched after applyArchitectureConstraints", func() {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -367,12 +358,11 @@ var _ = Describe("CEL New Critical Tests", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		raw := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				SchedulingGates: []corev1.PodSchedulingGate{{Name: utils.SchedulingGateName}},
-			},
-		}
+		raw := NewPod().
+			WithName("pre-gated").
+			WithNamespace("default").
+			WithSchedulingGates(utils.SchedulingGateName).
+			Build()
 		pod := newPod(raw, ctx, recorder)
 		pod.ensureSchedulingGate()
 
@@ -392,10 +382,10 @@ var _ = Describe("CEL New Critical Tests", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		raw := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "ungated", Namespace: "default"},
-			Spec:       corev1.PodSpec{},
-		}
+		raw := NewPod().
+			WithName("ungated").
+			WithNamespace("default").
+			Build()
 		pod := newPod(raw, ctx, recorder)
 		pod.ensureSchedulingGate()
 
@@ -415,14 +405,11 @@ var _ = Describe("CEL New Critical Tests", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		raw := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "multi-gated", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				SchedulingGates: []corev1.PodSchedulingGate{
-					{Name: "other-controller.example.com/my-gate"},
-				},
-			},
-		}
+		raw := NewPod().
+			WithName("multi-gated").
+			WithNamespace("default").
+			WithSchedulingGates("other-controller.example.com/my-gate").
+			Build()
 		pod := newPod(raw, ctx, recorder)
 		pod.ensureSchedulingGate()
 
@@ -450,26 +437,19 @@ var _ = Describe("CEL New Critical Tests", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		raw := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "disabled-gate-test", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-			},
-		}
+		raw := NewPod().
+			WithName("disabled-gate-test").
+			WithNamespace("default").
+			WithContainersImages("nginx:latest").
+			Build()
 		pod := newPod(raw, ctx, recorder)
 
 		ppcs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().
+				WithName("disabled-ppc").
+				WithNamespace("default").
+				WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le}, nil).
+				Build(),
 		}
 
 		wh := &PodSchedulingGateMutatingWebHook{}

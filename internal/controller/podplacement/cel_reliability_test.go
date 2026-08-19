@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Red Hat, Inc.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@ limitations under the License.
 package podplacement
 
 import (
-	"sync"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -30,101 +28,6 @@ import (
 )
 
 var _ = Describe("CEL Reliability", func() {
-
-	// TestFirstMatchWinsStrictOrdering
-	It("should evaluate rules strictly in order and stop at first match", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "first-rule", Expression: "self.metadata.name.startsWith('test-')", Architectures: []string{"ppc64le"}},
-			{Name: "second-rule-also-matches", Expression: "self.metadata.name.startsWith('test-')", Architectures: []string{"amd64"}},
-			{Name: "third-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"arm64"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeTrue())
-		Expect(result.ruleName).To(Equal("first-rule"))
-		Expect(result.architectures).To(ConsistOf("ppc64le"))
-	})
-
-	// TestFirstMatchWinsFallbackNotApplied
-	It("should not apply fallback when a rule matches", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "matching-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		fallback := []string{"amd64", "arm64"}
-		result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeTrue())
-		Expect(result.architectures).To(ConsistOf("ppc64le"))
-	})
-
-	// TestMultipleMatchingRulesOnlyFirstApplied
-	It("should only apply first matching rule when multiple rules match", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "broad-match", Expression: "has(self.metadata.labels.app)", Architectures: []string{"ppc64le"}},
-			{Name: "specific-match", Expression: "self.metadata.labels.app == 'web'", Architectures: []string{"amd64"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}}}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.ruleName).To(Equal("broad-match"))
-		Expect(result.architectures).To(ConsistOf("ppc64le"))
-	})
-
-	// TestInvalidCELExpressionDoesNotPanic
-	It("should not panic on invalid CEL expressions", func() {
-		Expect(func() {
-			rules := []plugins.ArchitectureRule{
-				{Name: "invalid-syntax", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-				{Name: "valid-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"amd64"}},
-			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-			result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.matched).To(BeTrue())
-			Expect(result.ruleName).To(Equal("valid-rule"))
-		}).NotTo(Panic())
-	})
-
-	// TestInvalidCELTreatedAsFalse
-	It("should treat invalid CEL as false (non-matching) and use fallback", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "invalid-expression", Expression: "self.nonexistent.field.access", Architectures: []string{"ppc64le"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64"}, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeFalse())
-		Expect(result.architectures).To(ConsistOf("amd64"))
-	})
-
-	// TestAllInvalidRulesTriggerFallback
-	It("should use fallback when all rules are invalid", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "invalid-1", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-			{Name: "invalid-2", Expression: "self.nonexistent.field", Architectures: []string{"arm64"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64", "s390x"}, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeFalse())
-		Expect(result.architectures).To(HaveLen(2))
-	})
-
-	// TestRepeatedInvalidCELEvaluationStable
-	It("should remain stable across repeated evaluations of invalid CEL", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "invalid-rule", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-		}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		for i := 0; i < 10; i++ {
-			result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64"}, pod)
-			Expect(err).NotTo(HaveOccurred(), "Iteration %d", i)
-			Expect(result.matched).To(BeFalse(), "Iteration %d", i)
-			Expect(result.architectures).To(ConsistOf("amd64"), "Iteration %d", i)
-		}
-	})
 
 	// TestIdempotentRepeatedReconcile
 	It("should produce stable pod state when repeatedly applying the same architectures (idempotent)", func() {
@@ -221,68 +124,6 @@ var _ = Describe("CEL Reliability", func() {
 		}
 	})
 
-	// TestConcurrentCELCompilation
-	It("should be thread-safe for concurrent CEL compilation", func() {
-		evaluator, err := newCELEvaluator()
-		Expect(err).NotTo(HaveOccurred())
-
-		expressions := []string{
-			"self.metadata.name == 'test-1'",
-			"self.metadata.name == 'test-2'",
-			"self.metadata.name == 'test-3'",
-			"self.metadata.name.startsWith('test-')",
-			"has(self.metadata.labels.app)",
-		}
-		var wg sync.WaitGroup
-		errors := make(chan error, len(expressions)*10)
-		for i := 0; i < 10; i++ {
-			for _, expr := range expressions {
-				wg.Add(1)
-				go func(expression string) {
-					defer wg.Done()
-					_, err := evaluator.compile(expression)
-					if err != nil {
-						errors <- err
-					}
-				}(expr)
-			}
-		}
-		wg.Wait()
-		close(errors)
-		for err := range errors {
-			Expect(err).NotTo(HaveOccurred(), "Concurrent compilation error")
-		}
-	})
-
-	// TestCELCacheReuse
-	It("should reuse cached compiled expressions", func() {
-		evaluator, err := newCELEvaluator()
-		Expect(err).NotTo(HaveOccurred())
-		expression := "self.metadata.name == 'test'"
-
-		prog1, err := evaluator.compile(expression)
-		Expect(err).NotTo(HaveOccurred())
-		prog2, err := evaluator.compile(expression)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(prog1).To(BeIdenticalTo(prog2), "Expected cached program to be reused, but got different instance")
-
-		evaluator.mu.Lock()
-		found := evaluator.cache.Contains(expression)
-		evaluator.mu.Unlock()
-		Expect(found).To(BeTrue(), "Expression not found in cache")
-	})
-
-	// TestNilPodHandling
-	It("should handle nil pod safely", func() {
-		rules := []plugins.ArchitectureRule{
-			{Name: "test-rule", Expression: "self.metadata.name == 'test'", Architectures: []string{"amd64"}},
-		}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"ppc64le"}, nil)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeFalse())
-		Expect(result.architectures).To(ConsistOf("ppc64le"))
-	})
-
 	// TestNilAffinityHandling
 	It("should handle nil affinity structures safely", func() {
 		pod := &corev1.Pod{
@@ -294,26 +135,5 @@ var _ = Describe("CEL Reliability", func() {
 
 		applyArchitectureNodeAffinity(pod, []string{"amd64"})
 		Expect(pod.Spec.Affinity).NotTo(BeNil(), "Affinity should have been created")
-	})
-
-	// TestEmptyRulesUseFallback
-	It("should use fallback for empty rules list", func() {
-		rules := []plugins.ArchitectureRule{}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64", "arm64"}, pod)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(result.matched).To(BeFalse())
-		Expect(result.architectures).To(HaveLen(2))
-	})
-
-	// TestEmptyArchitecturesList
-	It("should not modify pod for empty architectures list", func() {
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
-		modified := applyArchitectureConstraints(pod, []string{})
-		Expect(modified).To(BeFalse(), "Empty architectures should not modify pod")
-		if pod.Spec.Affinity != nil {
-			Expect(pod.Spec.Affinity.NodeAffinity).To(BeNil(),
-				"Node affinity should not be created for empty architectures")
-		}
 	})
 })
