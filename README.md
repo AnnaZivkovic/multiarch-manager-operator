@@ -194,7 +194,7 @@ See [Openshift Enhancement Proposal](https://github.com/openshift/enhancements/b
 
 ## License
 
-Copyright 2023 Red Hat, Inc.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
