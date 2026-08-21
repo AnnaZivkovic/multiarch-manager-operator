@@ -65,6 +65,22 @@ func (w *PodPlacementConfigWebhook) Handle(ctx context.Context, req admission.Re
 			}
 		}
 
+		// Validate CEL expressions in CelArchitecturePlacement plugin
+		if newPPC.PluginsEnabled(common.CelArchitecturePlacementPluginName) {
+			celPlugin := newPPC.Spec.Plugins.CelArchitecturePlacement
+			if celPlugin != nil {
+				// Validate architectures
+				if err := celPlugin.ValidateArchitectures(); err != nil {
+					return admission.Denied(fmt.Sprintf("invalid architectures in celArchitecturePlacement plugin: %v", err))
+				}
+
+				// Validate CEL expressions at admission time
+				if err := celPlugin.ValidateCELExpressions(); err != nil {
+					return admission.Denied(err.Error())
+				}
+			}
+		}
+
 		// List existing PodPlacementConfigs in the same namespace
 		existingPPCs := &multiarchv1beta1.PodPlacementConfigList{}
 		if err := w.apiReader.List(ctx, existingPPCs, client.InNamespace(req.Namespace)); err != nil {

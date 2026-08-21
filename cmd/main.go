@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -270,7 +271,46 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		}
 		ants.Release()
 	})
-	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
+
+	// ppcCacheSynced returns true once the PodPlacementConfig informer cache has
+	// completed its initial list/sync.
+	//
+	// GetInformerForKind can fail if the manager cache has not yet started (e.g.,
+	// the first call arrives before the leader-elected manager is ready).  We retry
+	// on every call — once the informer is successfully obtained we short-circuit by
+	// caching the HasSynced func in ppcHasSynced.  This avoids a permanent fallback
+	// that would occur if sync.Once captured a transient startup error.
+	var (
+		ppcHasSynced     func() bool
+		ppcHasSyncedOnce sync.Mutex
+	)
+	ppcCacheSynced := func() bool {
+		ppcHasSyncedOnce.Lock()
+		local := ppcHasSynced
+		ppcHasSyncedOnce.Unlock()
+		if local != nil {
+			return local()
+		}
+		// Informer not yet obtained — try to get it.
+		informer, err := mgr.GetCache().GetInformerForKind(
+			context.Background(),
+			multiarchv1beta1.GroupVersion.WithKind(multiarchv1beta1.PodPlacementConfigKind),
+		)
+		if err != nil {
+			// Transient failure: cache may not be started yet.
+			// Return false so apiReader fallback remains active; retry next call.
+			setupLog.V(1).Info("PodPlacementConfig informer not yet available; retrying on next call",
+				"error", err)
+			return false
+		}
+		// Persist the resolved HasSynced function so future calls skip GetInformerForKind.
+		ppcHasSyncedOnce.Lock()
+		ppcHasSynced = informer.HasSynced
+		ppcHasSyncedOnce.Unlock()
+		return informer.HasSynced()
+	}
+
+	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 }
