@@ -81,7 +81,7 @@ ENVTEST_K8S_VERSION = 1.36.0
 # https://github.com/golangci/golangci-lint/releases
 GOLINT_VERSION = v2.12.2
 
-BUILD_IMAGE ?= registry.access.redhat.com/ubi9/go-toolset:1.26.4
+BUILD_IMAGE ?= registry.access.redhat.com/ubi9/go-toolset:1.26.7
 RUNTIME_IMAGE ?= registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 NO_DOCKER ?= 0
