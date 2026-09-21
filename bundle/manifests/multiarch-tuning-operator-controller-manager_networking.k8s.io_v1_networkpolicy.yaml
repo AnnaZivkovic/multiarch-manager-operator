@@ -5,11 +5,11 @@ metadata:
     kubernetes.io/description: Additive NetworkPolicy for the Multiarch Tuning Operator
       manager. DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less
       TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP
-      selectors unreliable.
+      selectors unreliable. Webhook ingress is destination-less TCP 9443 for conversion
+      and validating admission on the manager.
   labels:
     control-plane: controller-manager
   name: multiarch-tuning-operator-controller-manager
-  namespace: openshift-multiarch-tuning-operator
 spec:
   egress:
   - ports:
@@ -30,6 +30,9 @@ spec:
   ingress:
   - ports:
     - port: 8081
+      protocol: TCP
+  - ports:
+    - port: 9443
       protocol: TCP
   - from:
     - namespaceSelector:

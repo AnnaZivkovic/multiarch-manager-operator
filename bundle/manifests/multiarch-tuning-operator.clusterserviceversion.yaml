@@ -229,18 +229,6 @@ spec:
           verbs:
           - get
         - apiGroups:
-          - networking.k8s.io
-          resources:
-          - networkpolicies
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
           - monitoring.coreos.com
           resources:
           - prometheusrules
@@ -285,6 +273,18 @@ spec:
           - get
           - patch
           - update
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
         - apiGroups:
           - rbac.authorization.k8s.io
           resourceNames:

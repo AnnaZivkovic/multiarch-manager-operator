@@ -89,14 +89,12 @@ func TestManagerNetworkPolicyYAML(t *testing.T) {
 	assertPolicyTypes(t, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(t, np)
 	assertIngressPort(t, np, healthPort, true)
+	assertIngressPort(t, np, webhookPort, true)
 	assertIngressPortFromMonitoring(t, np, metricsPort)
 	assertDNSEgress(t, np)
 	assertDestinationLessEgressPort(t, np, apiPort)
 	if hasDestinationLessEgressPort(np, registryPort) {
 		t.Fatal("manager policy must not allow registry TCP 443")
-	}
-	if hasIngressPort(np, webhookPort) {
-		t.Fatal("manager policy must not open webhook 9443")
 	}
 }
 

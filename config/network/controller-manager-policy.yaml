@@ -6,6 +6,9 @@
 #   host-networked and HCP makes pod/ClusterIP selectors unreliable.
 # - Metrics ingress from openshift-monitoring on TCP 8443.
 # - Health on TCP 8081 with no source restriction.
+# - Webhook ingress is destination-less TCP 9443 because conversion and
+#   validating webhooks run in the manager and the API server is
+#   host-networked / HCP.
 # Registry TCP 443 is omitted: the manager does not inspect images.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -19,7 +22,8 @@ metadata:
       Additive NetworkPolicy for the Multiarch Tuning Operator manager.
       DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less
       TCP 6443 because the API server is host-networked and HCP makes
-      pod/ClusterIP selectors unreliable.
+      pod/ClusterIP selectors unreliable. Webhook ingress is destination-less
+      TCP 9443 for conversion and validating admission on the manager.
 spec:
   podSelector:
     matchLabels:
@@ -31,6 +35,9 @@ spec:
     - ports:
         - protocol: TCP
           port: 8081
+    - ports:
+        - protocol: TCP
+          port: 9443
     - from:
         - namespaceSelector:
             matchLabels:
