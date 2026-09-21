@@ -175,6 +175,7 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 				Entry("Role", builder.NewRole().WithName(utils.PodPlacementControllerName).WithNamespace(utils.Namespace()).Build()),
 				Entry("RoleBinding", builder.NewRoleBinding().WithName(utils.PodPlacementControllerName).WithNamespace(utils.Namespace()).Build()),
 				Entry("ServiceAccount", builder.NewServiceAccount().WithName(utils.PodPlacementWebhookName).WithNamespace(utils.Namespace()).Build()),
+				Entry("NetworkPolicy", builder.NewNetworkPolicy().WithName(utils.PodPlacementNetworkPolicyName).WithNamespace(utils.Namespace()).Build()),
 			)
 			It("should reconcile a service if changed", func() {
 				s := &corev1.Service{}

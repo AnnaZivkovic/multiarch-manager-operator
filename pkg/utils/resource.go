@@ -8,6 +8,7 @@ import (
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -88,6 +89,8 @@ func ApplyResource(ctx context.Context, clientSet *kubernetes.Clientset, client 
 		return resourceapply.ApplyClusterRole(ctx, clientSet.RbacV1(), recorder, t)
 	case *rbacv1.ClusterRoleBinding:
 		return resourceapply.ApplyClusterRoleBinding(ctx, clientSet.RbacV1(), recorder, t)
+	case *networkingv1.NetworkPolicy:
+		return resourceapply.ApplyNetworkPolicy(ctx, clientSet.NetworkingV1(), recorder, t, resourceCache)
 	case *monitoringv1.ServiceMonitor:
 		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(t)
 		if err != nil {

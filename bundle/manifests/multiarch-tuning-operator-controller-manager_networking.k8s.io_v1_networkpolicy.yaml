@@ -1,0 +1,46 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    kubernetes.io/description: Additive NetworkPolicy for the Multiarch Tuning Operator
+      manager. DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less
+      TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP
+      selectors unreliable.
+  labels:
+    control-plane: controller-manager
+  name: multiarch-tuning-operator-controller-manager
+  namespace: openshift-multiarch-tuning-operator
+spec:
+  egress:
+  - ports:
+    - port: 5353
+      protocol: TCP
+    - port: 5353
+      protocol: UDP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-dns
+      podSelector:
+        matchLabels:
+          dns.operator.openshift.io/daemonset-dns: default
+  - ports:
+    - port: 6443
+      protocol: TCP
+  ingress:
+  - ports:
+    - port: 8081
+      protocol: TCP
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-monitoring
+    ports:
+    - port: 8443
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+  policyTypes:
+  - Ingress
+  - Egress
