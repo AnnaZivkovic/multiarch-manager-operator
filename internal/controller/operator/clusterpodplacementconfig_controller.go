@@ -564,6 +564,10 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 			NamespacedTypedClient: r.ClientSet.NetworkingV1().NetworkPolicies(utils.Namespace()),
 			ObjName:               utils.PodPlacementNetworkPolicyName,
 		},
+		{
+			NamespacedTypedClient: r.ClientSet.NetworkingV1().NetworkPolicies(utils.Namespace()),
+			ObjName:               utils.PodPlacementImageInspectionNetworkPolicyName,
+		},
 	}
 
 	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
@@ -948,6 +952,7 @@ func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clu
 		buildControllerDeployment(clusterPodPlacementConfig, requiredSCCHostmountAnyUID, seLinuxOptionsType),
 		buildWebhookDeployment(clusterPodPlacementConfig),
 		buildNetworkPolicyPodPlacement(),
+		buildNetworkPolicyPodPlacementImageInspection(),
 	}
 	return objects, nil
 }

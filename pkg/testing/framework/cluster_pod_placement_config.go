@@ -83,6 +83,7 @@ func getObjects() []client.Object {
 		builder.NewServiceAccount().WithName(utils.PodPlacementControllerName).WithNamespace(utils.Namespace()).Build(),
 		builder.NewServiceAccount().WithName(utils.PodPlacementWebhookName).WithNamespace(utils.Namespace()).Build(),
 		builder.NewNetworkPolicy().WithName(utils.PodPlacementNetworkPolicyName).WithNamespace(utils.Namespace()).Build(),
+		builder.NewNetworkPolicy().WithName(utils.PodPlacementImageInspectionNetworkPolicyName).WithNamespace(utils.Namespace()).Build(),
 		builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName),
 	}
 }

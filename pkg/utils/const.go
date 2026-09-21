@@ -74,18 +74,17 @@ const (
 )
 
 const (
-	PodMutatingWebhookConfigurationName = "pod-placement-mutating-webhook-configuration"
-	PodMutatingWebhookName              = "pod-placement-scheduling-gate.multiarch.openshift.io"
-	PodPlacementControllerName          = "pod-placement-controller"
-	PodPlacementWebhookName             = "pod-placement-web-hook"
-	PodPlacementNetworkPolicyName       = "pod-placement-operands"
+	PodMutatingWebhookConfigurationName          = "pod-placement-mutating-webhook-configuration"
+	PodMutatingWebhookName                       = "pod-placement-scheduling-gate.multiarch.openshift.io"
+	PodPlacementControllerName                   = "pod-placement-controller"
+	PodPlacementWebhookName                      = "pod-placement-web-hook"
+	PodPlacementNetworkPolicyName                = "pod-placement-operands"
+	PodPlacementImageInspectionNetworkPolicyName = "pod-placement-controller-image-inspection"
 )
 
 const (
 	OpenShiftDNSNamespaceName            = "openshift-dns"
 	OpenShiftDNSNamespaceLabelKey        = "kubernetes.io/metadata.name"
-	OpenShiftDNSPodLabelKey              = "dns.operator.openshift.io/daemonset-dns"
-	OpenShiftDNSPodLabelValue            = "default"
 	OpenShiftMonitoringNamespace         = "openshift-monitoring"
 	OpenShiftMonitoringNamespaceLabelKey = "kubernetes.io/metadata.name"
 )

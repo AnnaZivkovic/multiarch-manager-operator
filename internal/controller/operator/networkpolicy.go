@@ -26,20 +26,20 @@ import (
 )
 
 const (
-	healthPort   int32 = 8081
-	metricsPort  int32 = 8443
-	webhookPort  int32 = 9443
-	dnsPort      int32 = 5353
-	apiPort      int32 = 6443
-	registryPort int32 = 443
+	healthPort  int32 = 8081
+	metricsPort int32 = 8443
+	webhookPort int32 = 9443
+	dnsPort     int32 = 5353
+	apiPort     int32 = 6443
 )
 
 // buildNetworkPolicyPodPlacement returns the additive NetworkPolicy for the
 // Deployment-based operands (controller, webhook, and enoexec handler).
 // Peers follow the OpenShift/OLM convention: openshift-dns on TCP/UDP 5353,
 // destination-less TCP 6443 for the host-networked/HCP API server,
-// openshift-monitoring on TCP 8443, destination-less TCP 9443 for admission,
-// and destination-less TCP 443 for image inspection.
+// openshift-monitoring on TCP 8443, and destination-less TCP 9443 for admission.
+// Registry egress is not granted here; only the image-inspection controller
+// needs it (see buildNetworkPolicyPodPlacementImageInspection).
 func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -49,7 +49,7 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 				utils.OperandLabelKey: operandName,
 			},
 			Annotations: map[string]string{
-				"kubernetes.io/description": "Additive NetworkPolicy for Multiarch Tuning Operator pod-placement operands. DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for the same reason. Registry egress is destination-less TCP 443 because image inspection contacts arbitrary registries.",
+				"kubernetes.io/description": "Additive NetworkPolicy for Multiarch Tuning Operator pod-placement operands. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for the same reason. Registry egress is granted only by the image-inspection policy on the pod-placement controller.",
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -70,7 +70,41 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 			Egress: []networkingv1.NetworkPolicyEgressRule{
 				dnsEgressRule(),
 				apiEgressRule(),
-				registryEgressRule(),
+			},
+		},
+	}
+}
+
+// buildNetworkPolicyPodPlacementImageInspection returns an egress-only policy
+// for the pod-placement controller, which is the only operand that inspects
+// container images. Destination-less TCP with no port restriction is required
+// so inspection can reach any registry a pod image might use (443, OpenShift
+// integrated registry 5000, insecure 80, mirrors, and cluster proxies).
+func buildNetworkPolicyPodPlacementImageInspection() *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.PodPlacementImageInspectionNetworkPolicyName,
+			Namespace: utils.Namespace(),
+			Labels: map[string]string{
+				utils.OperandLabelKey:   operandName,
+				utils.ControllerNameKey: utils.PodPlacementControllerName,
+			},
+			Annotations: map[string]string{
+				"kubernetes.io/description": "Egress-only NetworkPolicy for pod-placement-controller image inspection. Destination-less TCP with no port covers arbitrary registries and cluster proxies so any image a user schedules can be inspected.",
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					utils.OperandLabelKey:   operandName,
+					utils.ControllerNameKey: utils.PodPlacementControllerName,
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeEgress,
+			},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				imageInspectionEgressRule(),
 			},
 		},
 	}
@@ -78,7 +112,8 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 
 // buildNetworkPolicyENoExecDaemon returns an egress-only NetworkPolicy for the
 // ENoExec daemon. Incomplete egress-only policies are default-deny, so DNS 5353
-// and API 6443 are both required. The daemon does not inspect images, so 443 is omitted.
+// and API 6443 are both required. The daemon does not inspect images, so
+// registry egress is omitted.
 func buildNetworkPolicyENoExecDaemon() *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -88,7 +123,7 @@ func buildNetworkPolicyENoExecDaemon() *networkingv1.NetworkPolicy {
 				"app": utils.EnoexecDaemonSet,
 			},
 			Annotations: map[string]string{
-				"kubernetes.io/description": "Egress-only NetworkPolicy for the ENoExec daemon. DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable.",
+				"kubernetes.io/description": "Egress-only NetworkPolicy for the ENoExec daemon. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable.",
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -142,17 +177,15 @@ func webhookIngressRule() networkingv1.NetworkPolicyIngressRule {
 }
 
 func dnsEgressRule() networkingv1.NetworkPolicyEgressRule {
+	// Namespace-only: cluster-olm-operator dropped the daemonset-dns pod label
+	// because it is not guaranteed on every supported OpenShift/HCP DNS topology.
+	// AND-ing that label with PolicyTypeEgress would black-hole DNS if it is absent.
 	return networkingv1.NetworkPolicyEgressRule{
 		To: []networkingv1.NetworkPolicyPeer{
 			{
 				NamespaceSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						utils.OpenShiftDNSNamespaceLabelKey: utils.OpenShiftDNSNamespaceName,
-					},
-				},
-				PodSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						utils.OpenShiftDNSPodLabelKey: utils.OpenShiftDNSPodLabelValue,
 					},
 				},
 			},
@@ -173,11 +206,13 @@ func apiEgressRule() networkingv1.NetworkPolicyEgressRule {
 	}
 }
 
-func registryEgressRule() networkingv1.NetworkPolicyEgressRule {
-	// Destination-less: image inspection contacts arbitrary registries.
+func imageInspectionEgressRule() networkingv1.NetworkPolicyEgressRule {
+	// Destination-less TCP, all ports: users can pull from any registry host:port
+	// (HTTPS 443, OpenShift image-registry 5000, insecure 80, custom mirrors, proxies).
+	proto := corev1.ProtocolTCP
 	return networkingv1.NetworkPolicyEgressRule{
 		Ports: []networkingv1.NetworkPolicyPort{
-			networkPolicyPort(corev1.ProtocolTCP, registryPort),
+			{Protocol: &proto},
 		},
 	}
 }

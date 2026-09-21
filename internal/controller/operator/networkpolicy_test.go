@@ -30,6 +30,8 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
+const registryPort int32 = 443
+
 func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	np := buildNetworkPolicyPodPlacement()
 	if np.Name != utils.PodPlacementNetworkPolicyName {
@@ -45,7 +47,33 @@ func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	assertIngressPort(t, np, webhookPort, true)
 	assertDNSEgress(t, np)
 	assertDestinationLessEgressPort(t, np, apiPort)
-	assertDestinationLessEgressPort(t, np, registryPort)
+	if hasDestinationLessEgressPort(np, registryPort) {
+		t.Fatal("shared operand policy must not allow registry TCP 443")
+	}
+	if hasDestinationLessTCPAllPorts(np) {
+		t.Fatal("shared operand policy must not allow destination-less TCP on all ports")
+	}
+}
+
+func TestBuildNetworkPolicyPodPlacementImageInspection(t *testing.T) {
+	np := buildNetworkPolicyPodPlacementImageInspection()
+	if np.Name != utils.PodPlacementImageInspectionNetworkPolicyName {
+		t.Fatalf("name: got %q", np.Name)
+	}
+	if got := np.Spec.PodSelector.MatchLabels[utils.ControllerNameKey]; got != utils.PodPlacementControllerName {
+		t.Fatalf("controller selector: got %q", got)
+	}
+	if got := np.Spec.PodSelector.MatchLabels[utils.OperandLabelKey]; got != operandName {
+		t.Fatalf("operand selector: got %q", got)
+	}
+	assertPolicyTypes(t, np, networkingv1.PolicyTypeEgress)
+	if len(np.Spec.Ingress) != 0 {
+		t.Fatalf("image-inspection policy must be egress-only, got %d ingress rules", len(np.Spec.Ingress))
+	}
+	assertNoIPBlock(t, np)
+	if !hasDestinationLessTCPAllPorts(np) {
+		t.Fatal("image-inspection policy must allow destination-less TCP on all ports")
+	}
 }
 
 func TestBuildNetworkPolicyENoExecDaemon(t *testing.T) {
@@ -66,6 +94,9 @@ func TestBuildNetworkPolicyENoExecDaemon(t *testing.T) {
 	if hasDestinationLessEgressPort(np, registryPort) {
 		t.Fatal("daemon policy must not allow registry TCP 443")
 	}
+	if hasDestinationLessTCPAllPorts(np) {
+		t.Fatal("daemon policy must not allow destination-less TCP on all ports")
+	}
 }
 
 func TestManagerNetworkPolicyYAML(t *testing.T) {
@@ -73,12 +104,17 @@ func TestManagerNetworkPolicyYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read yaml: %v", err)
 	}
-	if strings.Contains(string(data), "include.release.openshift.io") {
-		t.Fatal("manager policy must not include CVO HyperShift payload annotations")
-	}
 	np := &networkingv1.NetworkPolicy{}
 	if err := yaml.Unmarshal(data, np); err != nil {
 		t.Fatalf("unmarshal: %v", err)
+	}
+	for key := range np.Annotations {
+		if strings.HasPrefix(key, "include.release.openshift.io/") {
+			// MTO is OLM-installed, not a CVO payload component.
+			// include.release.openshift.io/hypershift is a CVO include-in-release
+			// annotation and is a no-op in an OLM CSV.
+			t.Fatalf("manager policy must not include CVO payload annotation %q", key)
+		}
 	}
 	if np.Name != "controller-manager" {
 		t.Fatalf("name: got %q", np.Name)
@@ -95,6 +131,9 @@ func TestManagerNetworkPolicyYAML(t *testing.T) {
 	assertDestinationLessEgressPort(t, np, apiPort)
 	if hasDestinationLessEgressPort(np, registryPort) {
 		t.Fatal("manager policy must not allow registry TCP 443")
+	}
+	if hasDestinationLessTCPAllPorts(np) {
+		t.Fatal("manager policy must not allow destination-less TCP on all ports")
 	}
 }
 
@@ -151,8 +190,8 @@ func assertDNSEgress(t *testing.T, np *networkingv1.NetworkPolicy) {
 		if peer.NamespaceSelector == nil || peer.NamespaceSelector.MatchLabels[utils.OpenShiftDNSNamespaceLabelKey] != utils.OpenShiftDNSNamespaceName {
 			t.Fatalf("dns namespaceSelector: %+v", peer.NamespaceSelector)
 		}
-		if peer.PodSelector == nil || peer.PodSelector.MatchLabels[utils.OpenShiftDNSPodLabelKey] != utils.OpenShiftDNSPodLabelValue {
-			t.Fatalf("dns podSelector: %+v", peer.PodSelector)
+		if peer.PodSelector != nil {
+			t.Fatalf("dns egress must be namespace-only, got podSelector %+v", peer.PodSelector)
 		}
 		return
 	}
@@ -173,6 +212,23 @@ func hasDestinationLessEgressPort(np *networkingv1.NetworkPolicy, port int32) bo
 		}
 		if hasPort(rule.Ports, corev1.ProtocolTCP, port) {
 			return true
+		}
+	}
+	return false
+}
+
+func hasDestinationLessTCPAllPorts(np *networkingv1.NetworkPolicy) bool {
+	for _, rule := range np.Spec.Egress {
+		if len(rule.To) != 0 {
+			continue
+		}
+		if len(rule.Ports) == 0 {
+			return true
+		}
+		for _, p := range rule.Ports {
+			if p.Protocol != nil && *p.Protocol == corev1.ProtocolTCP && p.Port == nil {
+				return true
+			}
 		}
 	}
 	return false

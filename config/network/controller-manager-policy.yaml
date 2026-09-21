@@ -1,7 +1,9 @@
 # NetworkPolicy for the Multiarch Tuning Operator manager.
 #
 # Additive OpenShift/OLM convention:
-# - DNS egress to openshift-dns on TCP/UDP 5353 (CoreDNS container port).
+# - DNS egress to the openshift-dns namespace on TCP/UDP 5353 (CoreDNS container port).
+#   Namespace-only: the daemonset-dns pod label is not guaranteed on every
+#   supported OpenShift/HCP DNS topology.
 # - API egress is destination-less TCP 6443 because the API server is
 #   host-networked and HCP makes pod/ClusterIP selectors unreliable.
 # - Metrics ingress from openshift-monitoring on TCP 8443.
@@ -10,6 +12,8 @@
 #   validating webhooks run in the manager and the API server is
 #   host-networked / HCP.
 # Registry TCP 443 is omitted: the manager does not inspect images.
+# CVO payload annotations (include.release.openshift.io/*) are omitted:
+# MTO is OLM-installed, not rendered by CVO.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,9 +24,9 @@ metadata:
   annotations:
     kubernetes.io/description: >-
       Additive NetworkPolicy for the Multiarch Tuning Operator manager.
-      DNS uses openshift-dns on TCP/UDP 5353. API egress is destination-less
-      TCP 6443 because the API server is host-networked and HCP makes
-      pod/ClusterIP selectors unreliable. Webhook ingress is destination-less
+      DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is
+      destination-less TCP 6443 because the API server is host-networked and HCP
+      makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less
       TCP 9443 for conversion and validating admission on the manager.
 spec:
   podSelector:
@@ -50,9 +54,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: openshift-dns
-          podSelector:
-            matchLabels:
-              dns.operator.openshift.io/daemonset-dns: default
       ports:
         - protocol: TCP
           port: 5353
