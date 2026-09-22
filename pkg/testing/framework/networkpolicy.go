@@ -76,7 +76,7 @@ func VerifyENoExecDaemonNetworkPolicy(ctx context.Context, c client.Client) func
 	}
 }
 
-// VerifyManagerNetworkPolicy asserts the OLM/Kustomize manager NetworkPolicy.
+// VerifyManagerNetworkPolicy asserts the runtime manager NetworkPolicy.
 func VerifyManagerNetworkPolicy(ctx context.Context, c client.Client) func(gomega.Gomega) {
 	return func(g gomega.Gomega) {
 		ginkgo.By("Verify the manager NetworkPolicy")

@@ -249,6 +249,10 @@ func runManager() {
 		DynamicClient: dynamic.NewForConfigOrDie(cfg),
 		Recorder:      events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}),
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
+	Expect((&ManagerNetworkPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
 	Expect((&apiv1beta1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr)).NotTo(HaveOccurred())
 
 	By("Setting up podplacementconfig validating webhook")

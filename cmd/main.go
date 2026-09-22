@@ -236,6 +236,11 @@ func RunOperator(mgr ctrl.Manager) {
 			clock.RealClock{},
 		),
 	}).SetupWithManager(mgr), unableToCreateController, controllerKey, "ClusterPodPlacementConfig")
+	must((&operator.ManagerNetworkPolicyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr),
+		unableToCreateController, controllerKey, "ManagerNetworkPolicy")
 	must((&multiarchv1beta1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr), unableToCreateController,
 		controllerKey, "ClusterPodPlacementConfigConversionWebhook")
 }

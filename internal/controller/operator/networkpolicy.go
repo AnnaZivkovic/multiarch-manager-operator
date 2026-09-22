@@ -143,6 +143,45 @@ func buildNetworkPolicyENoExecDaemon() *networkingv1.NetworkPolicy {
 	}
 }
 
+// buildNetworkPolicyManager returns the additive NetworkPolicy for the
+// operator manager Deployment. Peers follow the same OpenShift/OLM
+// convention as the operand policies. Image-inspection egress is omitted
+// because the manager does not inspect container images.
+func buildNetworkPolicyManager() *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.ManagerNetworkPolicyName,
+			Namespace: utils.Namespace(),
+			Labels: map[string]string{
+				"control-plane": "controller-manager",
+			},
+			Annotations: map[string]string{
+				"kubernetes.io/description": "Additive NetworkPolicy for the Multiarch Tuning Operator manager. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for conversion and validating admission on the manager.",
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"control-plane": "controller-manager",
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				healthIngressRule(),
+				webhookIngressRule(),
+				metricsIngressRule(),
+			},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				dnsEgressRule(),
+				apiEgressRule(),
+			},
+		},
+	}
+}
+
 func healthIngressRule() networkingv1.NetworkPolicyIngressRule {
 	return networkingv1.NetworkPolicyIngressRule{
 		Ports: []networkingv1.NetworkPolicyPort{

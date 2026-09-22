@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/yaml"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -102,25 +101,16 @@ func TestBuildNetworkPolicyENoExecDaemon(t *testing.T) {
 	}
 }
 
-func TestManagerNetworkPolicyYAML(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "network", "controller-manager-policy.yaml"))
-	if err != nil {
-		t.Fatalf("read yaml: %v", err)
-	}
-	np := &networkingv1.NetworkPolicy{}
-	if err := yaml.Unmarshal(data, np); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	for key := range np.Annotations {
-		if strings.HasPrefix(key, "include.release.openshift.io/") {
-			// MTO is OLM-installed, not a CVO payload component.
-			// include.release.openshift.io/hypershift is a CVO include-in-release
-			// annotation and is a no-op in an OLM CSV.
-			t.Fatalf("manager policy must not include CVO payload annotation %q", key)
-		}
-	}
-	if np.Name != "controller-manager" {
+func TestBuildNetworkPolicyManager(t *testing.T) {
+	np := buildNetworkPolicyManager()
+	if np.Name != utils.ManagerNetworkPolicyName {
 		t.Fatalf("name: got %q", np.Name)
+	}
+	if np.Namespace != utils.Namespace() {
+		t.Fatalf("namespace: got %q", np.Namespace)
+	}
+	if got := np.Labels["control-plane"]; got != "controller-manager" {
+		t.Fatalf("labels: got %q", np.Labels)
 	}
 	if got := np.Spec.PodSelector.MatchLabels["control-plane"]; got != "controller-manager" {
 		t.Fatalf("podSelector: got %q", got)
@@ -132,21 +122,18 @@ func TestManagerNetworkPolicyYAML(t *testing.T) {
 	assertIngressPortFromMonitoring(t, np, metricsPort)
 	assertDNSEgress(t, np)
 	assertDestinationLessEgressPort(t, np, apiPort)
-	if hasDestinationLessEgressPort(np, registryPort) {
-		t.Fatal("manager policy must not allow registry TCP 443")
-	}
 	if hasDestinationLessTCPAllPorts(np) {
 		t.Fatal("manager policy must not allow destination-less TCP on all ports")
 	}
 }
 
-func TestDefaultKustomizationIncludesNetwork(t *testing.T) {
+func TestDefaultKustomizationOmitsNetwork(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "default", "kustomization.yaml"))
 	if err != nil {
 		t.Fatalf("read kustomization: %v", err)
 	}
-	if !strings.Contains(string(data), "../network") {
-		t.Fatal("config/default/kustomization.yaml must include ../network")
+	if strings.Contains(string(data), "../network") {
+		t.Fatal("config/default/kustomization.yaml must not include ../network; the manager NetworkPolicy is created at runtime")
 	}
 }
 

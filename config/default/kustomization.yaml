@@ -36,6 +36,5 @@ resources:
 - ../rbac
 - ../manager
 - ../webhook
-- ../network
-  # [METRICS] Expose the controller manager metrics endpoint.
+# [METRICS] Expose the controller manager metrics endpoint.
 - metrics_service.yaml
