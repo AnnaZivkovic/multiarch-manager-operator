@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/util/retry"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
@@ -98,6 +99,17 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			c := &v1beta1.ClusterPodPlacementConfig{}
 			err = client.Get(ctx, runtimeclient.ObjectKey{Name: "cluster"}, c)
 			Expect(err).NotTo(HaveOccurred())
+		})
+		It("should create NetworkPolicies for the operands and manager", func() {
+			err := client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			Eventually(framework.VerifyOperandNetworkPolicies(ctx, client)).Should(Succeed())
+			Eventually(framework.VerifyManagerNetworkPolicy(ctx, client)).Should(Succeed())
 		})
 	})
 	Context("The webhook should get requests only for pods matching the namespaceSelector in the ClusterPodPlacementConfig CR", func() {
@@ -425,8 +437,16 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Verifying the FallbackArchitecture field is still set after round-trip conversion")
 			Expect(v1beta1obj.Spec.FallbackArchitecture).To(Equal("amd64"))
 			By("Clearing the FallbackArchitecture field")
-			v1beta1obj.Spec.FallbackArchitecture = ""
-			err = client.Update(ctx, v1beta1obj)
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &v1beta1.ClusterPodPlacementConfig{}
+				if err := client.Get(ctx, runtimeclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, latest); err != nil {
+					return err
+				}
+				latest.Spec.FallbackArchitecture = ""
+				return client.Update(ctx, latest)
+			})
 			Expect(err).NotTo(HaveOccurred())
 			v1alpha1obj = &v1alpha1.ClusterPodPlacementConfig{}
 			err = client.Get(ctx, runtimeclient.ObjectKey{
@@ -679,6 +699,8 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
 			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
 			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			Eventually(framework.VerifyOperandNetworkPolicies(ctx, client)).Should(Succeed())
+			Eventually(framework.VerifyENoExecDaemonNetworkPolicy(ctx, client)).Should(Succeed())
 			By("Deleting the clusterpodplacementconfig")
 			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{

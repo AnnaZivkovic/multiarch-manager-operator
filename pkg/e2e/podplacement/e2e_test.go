@@ -73,6 +73,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 	Expect(err).NotTo(HaveOccurred())
 	Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+	Eventually(framework.VerifyOperandNetworkPolicies(ctx, client)).Should(Succeed())
 	updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global")
 	masterNodes, err = framework.GetNodesWithLabel(ctx, client, "node-role.kubernetes.io/master", "")
 	Expect(err).NotTo(HaveOccurred())

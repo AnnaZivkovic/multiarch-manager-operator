@@ -80,6 +80,7 @@ const (
 	PodPlacementWebhookName                      = "pod-placement-web-hook"
 	PodPlacementNetworkPolicyName                = "pod-placement-operands"
 	PodPlacementImageInspectionNetworkPolicyName = "pod-placement-controller-image-inspection"
+	ManagerNetworkPolicyName                     = "multiarch-tuning-operator-controller-manager" // ManagerNetworkPolicyName is the kustomize namePrefix + controller-manager policy.
 )
 
 const (

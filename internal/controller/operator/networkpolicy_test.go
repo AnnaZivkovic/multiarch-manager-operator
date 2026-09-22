@@ -40,6 +40,9 @@ func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	if got := np.Spec.PodSelector.MatchLabels[utils.OperandLabelKey]; got != operandName {
 		t.Fatalf("podSelector: got %q", got)
 	}
+	if _, ok := np.Spec.PodSelector.MatchLabels[utils.ControllerNameKey]; ok {
+		t.Fatal("shared operand policy must not require the controller label")
+	}
 	assertPolicyTypes(t, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(t, np)
 	assertIngressPort(t, np, healthPort, true)

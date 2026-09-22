@@ -23,6 +23,7 @@ import (
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -178,6 +179,44 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 				Entry("NetworkPolicy", builder.NewNetworkPolicy().WithName(utils.PodPlacementNetworkPolicyName).WithNamespace(utils.Namespace()).Build()),
 				Entry("ImageInspectionNetworkPolicy", builder.NewNetworkPolicy().WithName(utils.PodPlacementImageInspectionNetworkPolicyName).WithNamespace(utils.Namespace()).Build()),
 			)
+			It("should apply NetworkPolicies with the expected peers", func() {
+				Eventually(framework.VerifyOperandNetworkPolicies(ctx, k8sClient)).Should(Succeed(),
+					"the operand NetworkPolicies should match the OpenShift/OLM contract")
+			})
+			It("should reconcile a NetworkPolicy if changed", func() {
+				np := &networkingv1.NetworkPolicy{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.PodPlacementNetworkPolicyName,
+					Namespace: utils.Namespace(),
+				}, np)
+				Expect(err).NotTo(HaveOccurred(), "failed to get NetworkPolicy "+utils.PodPlacementNetworkPolicyName, err)
+				By("clearing the NetworkPolicy egress rules")
+				np.Spec.Egress = nil
+				err = k8sClient.Update(ctx, np)
+				Expect(err).NotTo(HaveOccurred(), "failed to update NetworkPolicy "+utils.PodPlacementNetworkPolicyName, err)
+				By("waiting for the NetworkPolicy egress to be reconciled")
+				Eventually(framework.VerifyOperandNetworkPolicies(ctx, k8sClient)).Should(Succeed(),
+					"the operand NetworkPolicies should be restored")
+			})
+			It("should reconcile the image-inspection NetworkPolicy if changed", func() {
+				np := &networkingv1.NetworkPolicy{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.PodPlacementImageInspectionNetworkPolicyName,
+					Namespace: utils.Namespace(),
+				}, np)
+				Expect(err).NotTo(HaveOccurred(), "failed to get NetworkPolicy "+utils.PodPlacementImageInspectionNetworkPolicyName, err)
+				By("replacing image-inspection egress with destination-less TCP 443 only")
+				np.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{
+					Ports: []networkingv1.NetworkPolicyPort{
+						networkPolicyPort(corev1.ProtocolTCP, 443),
+					},
+				}}
+				err = k8sClient.Update(ctx, np)
+				Expect(err).NotTo(HaveOccurred(), "failed to update NetworkPolicy "+utils.PodPlacementImageInspectionNetworkPolicyName, err)
+				By("waiting for destination-less TCP on all ports to be restored")
+				Eventually(framework.VerifyOperandNetworkPolicies(ctx, k8sClient)).Should(Succeed(),
+					"the image-inspection NetworkPolicy should be restored")
+			})
 			It("should reconcile a service if changed", func() {
 				s := &corev1.Service{}
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&corev1.Service{
@@ -667,6 +706,40 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			}), &d)
 			Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+utils.EnoexecControllerName, err)
 			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
+		})
+		It("should apply a NetworkPolicy for the ENoExec daemon", func() {
+			Eventually(framework.VerifyENoExecDaemonNetworkPolicy(ctx, k8sClient)).Should(Succeed(),
+				"the ENoExec daemon NetworkPolicy should match the OpenShift/OLM contract")
+		})
+		It("should reconcile the ENoExec daemon NetworkPolicy if deleted", func() {
+			By("Deleting " + utils.EnoexecDaemonSet)
+			err := k8sClient.Delete(ctx, builder.NewNetworkPolicy().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete NetworkPolicy "+utils.EnoexecDaemonSet, err)
+			By("Looking for the object to be recreated")
+			Eventually(func(g Gomega) {
+				np := &networkingv1.NetworkPolicy{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				}, np)
+				g.Expect(err).NotTo(HaveOccurred(), "failed to get NetworkPolicy "+utils.EnoexecDaemonSet, err)
+				g.Expect(np.GetDeletionTimestamp().IsZero()).To(BeTrue(), "the NetworkPolicy is still pending deletion")
+			}).Should(Succeed(), "the NetworkPolicy "+utils.EnoexecDaemonSet+" should be recreated")
+		})
+		It("should reconcile the ENoExec daemon NetworkPolicy if changed", func() {
+			np := &networkingv1.NetworkPolicy{}
+			err := k8sClient.Get(ctx, crclient.ObjectKey{
+				Name:      utils.EnoexecDaemonSet,
+				Namespace: utils.Namespace(),
+			}, np)
+			Expect(err).NotTo(HaveOccurred(), "failed to get NetworkPolicy "+utils.EnoexecDaemonSet, err)
+			By("clearing the NetworkPolicy egress rules")
+			np.Spec.Egress = nil
+			err = k8sClient.Update(ctx, np)
+			Expect(err).NotTo(HaveOccurred(), "failed to update NetworkPolicy "+utils.EnoexecDaemonSet, err)
+			By("waiting for the NetworkPolicy egress to be reconciled")
+			Eventually(framework.VerifyENoExecDaemonNetworkPolicy(ctx, k8sClient)).Should(Succeed(),
+				"the ENoExec daemon NetworkPolicy should be restored")
 		})
 		It("should delete errored ENoExecEvents during cleanup and allow plugin disable", func() {
 			By("Creating errored ENoExecEvents")
