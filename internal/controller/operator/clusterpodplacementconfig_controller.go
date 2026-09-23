@@ -133,7 +133,9 @@ const (
 // Operand Deployments, DaemonSets, Services, ServiceAccounts, Roles,
 // RoleBindings, NetworkPolicies, and monitoring objects are created only in
 // the operator namespace (utils.Namespace()). namespace=system is the
-// kustomize placeholder rewritten to the install namespace.
+// kustomize placeholder rewritten to the install namespace. Keep these
+// markers aligned with CacheByObject() so informers do not list cluster-wide
+// against a namespaced Role.
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;create;delete,namespace=system
 //+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get,namespace=system
 //+kubebuilder:rbac:groups=apps,resources=deployments/finalizers,verbs=update,namespace=system

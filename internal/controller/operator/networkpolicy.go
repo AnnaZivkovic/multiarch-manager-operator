@@ -79,8 +79,7 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 // buildNetworkPolicyPodPlacementImageInspection returns an egress-only policy
 // for the pod-placement controller, which is the only operand that inspects
 // container images. Destination-less TCP with no port restriction is required
-// so inspection can reach any registry a pod image might use (443, OpenShift
-// integrated registry 5000, insecure 80, mirrors, and cluster proxies).
+// so inspection can reach any registry a pod image might use.
 func buildNetworkPolicyPodPlacementImageInspection() *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{

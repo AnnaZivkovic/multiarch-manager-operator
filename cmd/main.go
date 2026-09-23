@@ -112,10 +112,17 @@ func main() {
 		DefaultTransform: cache.TransformStripManagedFields(),
 	}
 
-	// Build the leader election ID deterministically and based on the flags
+	// Build the leader election ID deterministically and based on the flags.
+	// Modes are mutually exclusive, so ByObject / DefaultNamespaces are never merged.
 	leaderID := "208d7abd.multiarch.openshift.io"
 	if enableOperator {
 		leaderID = fmt.Sprintf("operator-%s", leaderID)
+		// Operand Deployments, NetworkPolicies, and related objects live only in
+		// the operator namespace and are bound by a Role. A cluster-wide informer
+		// would 403 against that Role. PodPlacementConfig stays unscoped so the
+		// operator can list it in every namespace. Pending Pods are listed via
+		// ClientSet, not this cache.
+		cacheOpts.ByObject = operator.CacheByObject()
 	}
 	if enableClusterPodPlacementConfigOperandControllers {
 		leaderID = fmt.Sprintf("ppc-controllers-%s", leaderID)
@@ -129,6 +136,8 @@ func main() {
 	}
 	if enableENoExecEventControllers {
 		leaderID = fmt.Sprintf("enoexecevent-controllers-%s", leaderID)
+		// ENoExecEvents are created in the operator namespace. Referenced Pods
+		// may live elsewhere and are fetched via the live API, not this cache.
 		cacheOpts.DefaultNamespaces = map[string]cache.Config{
 			utils.Namespace(): {},
 		}
@@ -150,7 +159,14 @@ func main() {
 		CertDir: certDir,
 		TLSOpts: tlsOpts,
 	})
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	if enableOperator {
+		dynClient := dynamic.NewForConfigOrDie(restConfig)
+		if utils.IsResourceAvailable(context.Background(), dynClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
+			operator.AddMonitoringCache(cacheOpts.ByObject)
+		}
+	}
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:    metricsAddr,

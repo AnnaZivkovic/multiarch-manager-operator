@@ -44,6 +44,7 @@ import (
 	"k8s.io/utils/clock"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -229,6 +230,10 @@ func runManager() {
 		HealthProbeBindAddress: ":4980",
 		Logger:                 suiteLog,
 		WebhookServer:          webhookServer,
+		Cache: cache.Options{
+			DefaultTransform: cache.TransformStripManagedFields(),
+			ByObject:         CacheByObject(),
+		},
 	})
 	Expect(err).NotTo(HaveOccurred())
 
