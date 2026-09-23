@@ -153,32 +153,6 @@ spec:
           - update
           - watch
         - apiGroups:
-          - ""
-          resources:
-          - serviceaccounts
-          - services
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - ""
-          resources:
-          - serviceaccounts/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - ""
-          resources:
-          - serviceaccounts/status
-          - services/status
-          verbs:
-          - get
-        - apiGroups:
           - admissionregistration.k8s.io
           resources:
           - mutatingwebhookconfigurations
@@ -203,44 +177,6 @@ spec:
           - mutatingwebhookconfigurations/status
           verbs:
           - get
-        - apiGroups:
-          - apps
-          resources:
-          - daemonsets
-          - deployments
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
-        - apiGroups:
-          - apps
-          resources:
-          - deployments/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - apps
-          resources:
-          - deployments/status
-          verbs:
-          - get
-        - apiGroups:
-          - monitoring.coreos.com
-          resources:
-          - prometheusrules
-          - servicemonitors
-          verbs:
-          - create
-          - delete
-          - get
-          - list
-          - patch
-          - update
-          - watch
         - apiGroups:
           - multiarch.openshift.io
           resources:
@@ -274,16 +210,13 @@ spec:
           - patch
           - update
         - apiGroups:
-          - networking.k8s.io
+          - rbac.authorization.k8s.io
           resources:
-          - networkpolicies
+          - clusterrolebindings
+          - clusterroles
           verbs:
           - create
-          - delete
-          - get
           - list
-          - patch
-          - update
           - watch
         - apiGroups:
           - rbac.authorization.k8s.io
@@ -303,21 +236,8 @@ spec:
         - apiGroups:
           - rbac.authorization.k8s.io
           resources:
-          - clusterrolebindings
-          - clusterroles
-          - rolebindings
-          - roles
-          verbs:
-          - create
-          - list
-          - watch
-        - apiGroups:
-          - rbac.authorization.k8s.io
-          resources:
           - clusterrolebindings/finalizers
           - clusterroles/finalizers
-          - rolebindings/finalizers
-          - roles/finalizers
           verbs:
           - update
         - apiGroups:
@@ -325,24 +245,8 @@ spec:
           resources:
           - clusterrolebindings/status
           - clusterroles/status
-          - rolebindings/status
-          - roles/status
           verbs:
           - get
-        - apiGroups:
-          - rbac.authorization.k8s.io
-          resourceNames:
-          - enoexec-event-daemon
-          - enoexec-event-handler-controller
-          - pod-placement-controller
-          resources:
-          - rolebindings
-          - roles
-          verbs:
-          - delete
-          - get
-          - patch
-          - update
         - apiGroups:
           - security.openshift.io
           resources:
@@ -504,6 +408,119 @@ spec:
           verbs:
           - create
           - patch
+        - apiGroups:
+          - ""
+          resources:
+          - serviceaccounts
+          - services
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - serviceaccounts/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - ""
+          resources:
+          - serviceaccounts/status
+          - services/status
+          verbs:
+          - get
+        - apiGroups:
+          - apps
+          resources:
+          - daemonsets
+          - deployments
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - apps
+          resources:
+          - deployments/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - apps
+          resources:
+          - deployments/status
+          verbs:
+          - get
+        - apiGroups:
+          - monitoring.coreos.com
+          resources:
+          - prometheusrules
+          - servicemonitors
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - networking.k8s.io
+          resources:
+          - networkpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - rolebindings
+          - roles
+          verbs:
+          - create
+          - list
+          - watch
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resourceNames:
+          - enoexec-event-daemon
+          - enoexec-event-handler-controller
+          - pod-placement-controller
+          resources:
+          - rolebindings
+          - roles
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - rolebindings/finalizers
+          - roles/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - rolebindings/status
+          - roles/status
+          verbs:
+          - get
         serviceAccountName: multiarch-tuning-operator-controller-manager
     strategy: deployment
   installModes:

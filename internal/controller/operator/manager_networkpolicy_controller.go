@@ -46,8 +46,8 @@ type ManagerNetworkPolicyReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;get;list;patch;update;watch
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch,namespace=system
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;get;list;patch;update;watch,namespace=system
 
 func (r *ManagerNetworkPolicyReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	deployment := &appsv1.Deployment{}
@@ -70,6 +70,10 @@ func (r *ManagerNetworkPolicyReconciler) Reconcile(ctx context.Context, _ ctrl.R
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
+		// Drop a stale controller ownerReference so SetControllerReference can
+		// adopt the policy when the manager Deployment is recreated with a new
+		// UID (envtest retries, OLM upgrade/reinstall).
+		dropControllerOwnerReferences(policy)
 		if err := ctrl.SetControllerReference(deployment, policy, r.Scheme); err != nil {
 			return err
 		}
@@ -79,6 +83,23 @@ func (r *ManagerNetworkPolicyReconciler) Reconcile(ctx context.Context, _ ctrl.R
 		return nil
 	})
 	return ctrl.Result{}, err
+}
+
+// dropControllerOwnerReferences removes existing controller ownerReferences so a
+// replacement owner (new UID) can be set. Non-controller ownerReferences are kept.
+func dropControllerOwnerReferences(obj metav1.Object) {
+	refs := obj.GetOwnerReferences()
+	if len(refs) == 0 {
+		return
+	}
+	cleaned := make([]metav1.OwnerReference, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Controller != nil && *ref.Controller {
+			continue
+		}
+		cleaned = append(cleaned, ref)
+	}
+	obj.SetOwnerReferences(cleaned)
 }
 
 func (r *ManagerNetworkPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {

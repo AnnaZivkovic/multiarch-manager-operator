@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -37,6 +38,7 @@ func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	if np.Name != utils.PodPlacementNetworkPolicyName {
 		t.Fatalf("name: got %q", np.Name)
 	}
+	assertOperatorNamespace(t, np)
 	if got := np.Spec.PodSelector.MatchLabels[utils.OperandLabelKey]; got != operandName {
 		t.Fatalf("podSelector: got %q", got)
 	}
@@ -63,6 +65,7 @@ func TestBuildNetworkPolicyPodPlacementImageInspection(t *testing.T) {
 	if np.Name != utils.PodPlacementImageInspectionNetworkPolicyName {
 		t.Fatalf("name: got %q", np.Name)
 	}
+	assertOperatorNamespace(t, np)
 	if got := np.Spec.PodSelector.MatchLabels[utils.ControllerNameKey]; got != utils.PodPlacementControllerName {
 		t.Fatalf("controller selector: got %q", got)
 	}
@@ -84,6 +87,7 @@ func TestBuildNetworkPolicyENoExecDaemon(t *testing.T) {
 	if np.Name != utils.EnoexecDaemonSet {
 		t.Fatalf("name: got %q", np.Name)
 	}
+	assertOperatorNamespace(t, np)
 	if got := np.Spec.PodSelector.MatchLabels["app"]; got != utils.EnoexecDaemonSet {
 		t.Fatalf("podSelector: got %q", got)
 	}
@@ -107,9 +111,7 @@ func TestBuildNetworkPolicyManager(t *testing.T) {
 	if np.Name != utils.ManagerNetworkPolicyName {
 		t.Fatalf("name: got %q", np.Name)
 	}
-	if np.Namespace != utils.Namespace() {
-		t.Fatalf("namespace: got %q", np.Namespace)
-	}
+	assertOperatorNamespace(t, np)
 	if got := np.Labels["control-plane"]; got != "controller-manager" {
 		t.Fatalf("labels: got %q", np.Labels)
 	}
@@ -135,6 +137,75 @@ func TestDefaultKustomizationOmitsNetwork(t *testing.T) {
 	}
 	if strings.Contains(string(data), "../network") {
 		t.Fatal("config/default/kustomization.yaml must not include ../network; the manager NetworkPolicy is created at runtime")
+	}
+}
+
+func TestDropControllerOwnerReferences(t *testing.T) {
+	controlled := true
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			OwnerReferences: []metav1.OwnerReference{
+				{Name: "old-deploy", UID: "uid-a", Controller: &controlled},
+				{Name: "keep-me", UID: "uid-cm"},
+			},
+		},
+	}
+	dropControllerOwnerReferences(np)
+	if len(np.OwnerReferences) != 1 {
+		t.Fatalf("ownerReferences len: got %d", len(np.OwnerReferences))
+	}
+	if np.OwnerReferences[0].Name != "keep-me" {
+		t.Fatalf("non-controller ownerReference was dropped: got %q", np.OwnerReferences[0].Name)
+	}
+}
+
+func TestNetworkPoliciesAreCreatedInOperatorNamespace(t *testing.T) {
+	policies := []*networkingv1.NetworkPolicy{
+		buildNetworkPolicyPodPlacement(),
+		buildNetworkPolicyPodPlacementImageInspection(),
+		buildNetworkPolicyENoExecDaemon(),
+		buildNetworkPolicyManager(),
+	}
+	for _, np := range policies {
+		assertOperatorNamespace(t, np)
+	}
+}
+
+func TestNamespacedOperandRBACIsNotClusterScoped(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "rbac", "role.yaml"))
+	if err != nil {
+		t.Fatalf("read role.yaml: %v", err)
+	}
+	clusterRole, namespacedRole, ok := splitManagerRoles(string(data))
+	if !ok {
+		t.Fatal("config/rbac/role.yaml must contain both a ClusterRole and a namespaced Role")
+	}
+	for _, resource := range []string{"networkpolicies", "deployments", "daemonsets", "servicemonitors"} {
+		if strings.Contains(clusterRole, "- "+resource) {
+			t.Errorf("ClusterRole must not grant %s; bind it on the namespaced Role", resource)
+		}
+		if !strings.Contains(namespacedRole, "- "+resource) {
+			t.Errorf("namespaced Role must grant %s", resource)
+		}
+	}
+}
+
+func splitManagerRoles(raw string) (clusterRole, namespacedRole string, ok bool) {
+	for _, doc := range strings.Split(raw, "\n---\n") {
+		switch {
+		case strings.Contains(doc, "\nkind: ClusterRole\n"):
+			clusterRole = doc
+		case strings.Contains(doc, "\nkind: Role\n"):
+			namespacedRole = doc
+		}
+	}
+	return clusterRole, namespacedRole, clusterRole != "" && namespacedRole != ""
+}
+
+func assertOperatorNamespace(t *testing.T, np *networkingv1.NetworkPolicy) {
+	t.Helper()
+	if np.Namespace != utils.Namespace() {
+		t.Fatalf("%s namespace: got %q want %q", np.Name, np.Namespace, utils.Namespace())
 	}
 }
 

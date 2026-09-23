@@ -46,6 +46,114 @@ rules:
   - update
   - watch
 - apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  verbs:
+  - create
+  - list
+  - watch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resourceNames:
+  - pod-placement-mutating-webhook-configuration
+  resources:
+  - mutatingwebhookconfigurations
+  verbs:
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations/status
+  verbs:
+  - get
+- apiGroups:
+  - multiarch.openshift.io
+  resources:
+  - clusterpodplacementconfigs
+  - enoexecevents
+  - podplacementconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - multiarch.openshift.io
+  resources:
+  - clusterpodplacementconfigs/finalizers
+  - enoexecevents/finalizers
+  - podplacementconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - multiarch.openshift.io
+  resources:
+  - clusterpodplacementconfigs/status
+  - enoexecevents/status
+  - podplacementconfigs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings
+  - clusterroles
+  verbs:
+  - create
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - enoexec-event-daemon
+  - enoexec-event-handler-controller
+  - pod-placement-controller
+  - pod-placement-web-hook
+  resources:
+  - clusterrolebindings
+  - clusterroles
+  verbs:
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings/finalizers
+  - clusterroles/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings/status
+  - clusterroles/status
+  verbs:
+  - get
+- apiGroups:
+  - security.openshift.io
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manager-role
+  namespace: system
+rules:
+- apiGroups:
   - ""
   resources:
   - serviceaccounts
@@ -69,31 +177,6 @@ rules:
   resources:
   - serviceaccounts/status
   - services/status
-  verbs:
-  - get
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations
-  verbs:
-  - create
-  - list
-  - watch
-- apiGroups:
-  - admissionregistration.k8s.io
-  resourceNames:
-  - pod-placement-mutating-webhook-configuration
-  resources:
-  - mutatingwebhookconfigurations
-  verbs:
-  - delete
-  - get
-  - patch
-  - update
-- apiGroups:
-  - admissionregistration.k8s.io
-  resources:
-  - mutatingwebhookconfigurations/status
   verbs:
   - get
 - apiGroups:
@@ -135,38 +218,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - multiarch.openshift.io
-  resources:
-  - clusterpodplacementconfigs
-  - enoexecevents
-  - podplacementconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - multiarch.openshift.io
-  resources:
-  - clusterpodplacementconfigs/finalizers
-  - enoexecevents/finalizers
-  - podplacementconfigs/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - multiarch.openshift.io
-  resources:
-  - clusterpodplacementconfigs/status
-  - enoexecevents/status
-  - podplacementconfigs/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
@@ -180,24 +231,7 @@ rules:
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
-  resourceNames:
-  - enoexec-event-daemon
-  - enoexec-event-handler-controller
-  - pod-placement-controller
-  - pod-placement-web-hook
   resources:
-  - clusterrolebindings
-  - clusterroles
-  verbs:
-  - delete
-  - get
-  - patch
-  - update
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - clusterrolebindings
-  - clusterroles
   - rolebindings
   - roles
   verbs:
@@ -206,24 +240,6 @@ rules:
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
-  resources:
-  - clusterrolebindings/finalizers
-  - clusterroles/finalizers
-  - rolebindings/finalizers
-  - roles/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - clusterrolebindings/status
-  - clusterroles/status
-  - rolebindings/status
-  - roles/status
-  verbs:
-  - get
-- apiGroups:
-  - rbac.authorization.k8s.io
   resourceNames:
   - enoexec-event-daemon
   - enoexec-event-handler-controller
@@ -237,8 +253,16 @@ rules:
   - patch
   - update
 - apiGroups:
-  - security.openshift.io
+  - rbac.authorization.k8s.io
   resources:
-  - securitycontextconstraints
+  - rolebindings/finalizers
+  - roles/finalizers
   verbs:
-  - use
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings/status
+  - roles/status
+  verbs:
+  - get

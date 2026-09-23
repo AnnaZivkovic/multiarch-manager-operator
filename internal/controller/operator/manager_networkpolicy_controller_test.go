@@ -22,6 +22,8 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -46,7 +48,7 @@ func managerDeployment() *appsv1.Deployment {
 		Build()
 }
 
-var _ = Describe("The ManagerNetworkPolicyReconciler", func() {
+var _ = Describe("The ManagerNetworkPolicyReconciler", Serial, func() {
 	BeforeEach(func() {
 		By("Creating the manager Deployment")
 		Expect(k8sClient.Create(ctx, managerDeployment())).To(Succeed())
@@ -54,33 +56,40 @@ var _ = Describe("The ManagerNetworkPolicyReconciler", func() {
 			"the manager NetworkPolicy should be created for the manager Deployment")
 	})
 	AfterEach(func() {
-		By("Deleting the manager Deployment and NetworkPolicy")
-		// Delete both explicitly — don't rely on GC cascade in envtest
+		By("Deleting the manager Deployment")
 		Expect(crclient.IgnoreNotFound(
 			k8sClient.Delete(ctx, managerDeployment()))).To(Succeed())
-		Expect(crclient.IgnoreNotFound(
-			k8sClient.Delete(ctx, &networkingv1.NetworkPolicy{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      utils.ManagerNetworkPolicyName,
-					Namespace: utils.Namespace(),
-				},
-			}))).To(Succeed())
 
-		// Wait for BOTH to be fully gone before returning
+		By("Waiting for Deployment and NetworkPolicy to be fully cleaned up")
 		Eventually(func(g Gomega) {
+			// Verify Deployment is gone from the API server
 			err := k8sClient.Get(ctx, crclient.ObjectKey{
 				Name:      utils.OperatorName + "-controller-manager",
 				Namespace: utils.Namespace(),
 			}, &appsv1.Deployment{})
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
-				"deployment should be gone")
+				"deployment should be fully gone")
 
+			// Re-delete the NP each iteration — the reconciler may
+			// recreate it while its cache still holds the stale
+			// Deployment. Once the cache observes the Deployment
+			// deletion, the reconciler stops recreating the NP and
+			// this delete becomes a no-op.
+			_ = crclient.IgnoreNotFound(
+				k8sClient.Delete(ctx, &networkingv1.NetworkPolicy{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      utils.ManagerNetworkPolicyName,
+						Namespace: utils.Namespace(),
+					},
+				}))
+
+			// Verify the NP is gone
 			err = k8sClient.Get(ctx, crclient.ObjectKey{
 				Name:      utils.ManagerNetworkPolicyName,
 				Namespace: utils.Namespace(),
 			}, &networkingv1.NetworkPolicy{})
 			g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
-				"network policy should be gone")
+				"network policy should be fully gone")
 		}).Should(Succeed())
 	})
 	It("should reconcile the manager NetworkPolicy if deleted", func() {
@@ -94,17 +103,57 @@ var _ = Describe("The ManagerNetworkPolicyReconciler", func() {
 			"the manager NetworkPolicy should be recreated")
 	})
 	It("should reconcile the manager NetworkPolicy if changed", func() {
+		By("clearing the NetworkPolicy egress rules")
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			np := &networkingv1.NetworkPolicy{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      utils.ManagerNetworkPolicyName,
+				Namespace: utils.Namespace(),
+			}, np); err != nil {
+				return err
+			}
+			np.Spec.Egress = nil
+			return k8sClient.Update(ctx, np)
+		})
+		Expect(err).NotTo(HaveOccurred(), "failed to update NetworkPolicy "+utils.ManagerNetworkPolicyName, err)
+		Eventually(framework.VerifyManagerNetworkPolicy(ctx, k8sClient)).Should(Succeed(),
+			"the manager NetworkPolicy should be restored")
+	})
+	It("should adopt the NetworkPolicy when the manager Deployment is recreated with a new UID", func() {
 		np := &networkingv1.NetworkPolicy{}
 		err := k8sClient.Get(ctx, crclient.ObjectKey{
 			Name:      utils.ManagerNetworkPolicyName,
 			Namespace: utils.Namespace(),
 		}, np)
-		Expect(err).NotTo(HaveOccurred(), "failed to get NetworkPolicy "+utils.ManagerNetworkPolicyName, err)
-		By("clearing the NetworkPolicy egress rules")
-		np.Spec.Egress = nil
-		err = k8sClient.Update(ctx, np)
-		Expect(err).NotTo(HaveOccurred(), "failed to update NetworkPolicy "+utils.ManagerNetworkPolicyName, err)
-		Eventually(framework.VerifyManagerNetworkPolicy(ctx, k8sClient)).Should(Succeed(),
-			"the manager NetworkPolicy should be restored")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(np.OwnerReferences).NotTo(BeEmpty())
+		oldUID := np.OwnerReferences[0].UID
+
+		By("Deleting and recreating the manager Deployment")
+		Expect(k8sClient.Delete(ctx, managerDeployment())).To(Succeed())
+		Eventually(func() bool {
+			err := k8sClient.Get(ctx, crclient.ObjectKey{
+				Name:      utils.OperatorName + "-controller-manager",
+				Namespace: utils.Namespace(),
+			}, &appsv1.Deployment{})
+			return apierrors.IsNotFound(err)
+		}).Should(BeTrue())
+		Expect(k8sClient.Create(ctx, managerDeployment())).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			d := &appsv1.Deployment{}
+			g.Expect(k8sClient.Get(ctx, crclient.ObjectKey{
+				Name:      utils.OperatorName + "-controller-manager",
+				Namespace: utils.Namespace(),
+			}, d)).To(Succeed())
+			g.Expect(d.UID).NotTo(Equal(oldUID))
+			updated := &networkingv1.NetworkPolicy{}
+			g.Expect(k8sClient.Get(ctx, crclient.ObjectKey{
+				Name:      utils.ManagerNetworkPolicyName,
+				Namespace: utils.Namespace(),
+			}, updated)).To(Succeed())
+			g.Expect(updated.OwnerReferences).NotTo(BeEmpty())
+			g.Expect(updated.OwnerReferences[0].UID).To(Equal(d.UID))
+		}).Should(Succeed(), "the NetworkPolicy should be adopted by the new Deployment UID")
 	})
 })
