@@ -26,7 +26,6 @@ import (
 )
 
 const (
-	healthPort  int32 = 8081
 	metricsPort int32 = 8443
 	webhookPort int32 = 9443
 	dnsPort     int32 = 5353
@@ -35,11 +34,14 @@ const (
 
 // buildNetworkPolicyPodPlacement returns the additive NetworkPolicy for the
 // Deployment-based operands (controller, webhook, and enoexec handler).
-// Peers follow the OpenShift/OLM convention: openshift-dns on TCP/UDP 5353,
+// Peers follow the OpenShift operator convention: openshift-dns on TCP/UDP 5353,
 // destination-less TCP 6443 for the host-networked/HCP API server,
 // openshift-monitoring on TCP 8443, and destination-less TCP 9443 for admission.
-// Registry egress is not granted here; only the image-inspection controller
-// needs it (see buildNetworkPolicyPodPlacementImageInspection).
+// Health probes on 8081 are omitted: kubelet traffic is host-networked and is
+// not filtered by NetworkPolicy. Registry egress is not granted here; only the
+// image-inspection controller needs it (see buildNetworkPolicyPodPlacementImageInspection).
+// PolicyTypes [Ingress, Egress] isolate unmatched traffic for this selector, so
+// a separate empty deny-all policy is not required.
 func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -49,7 +51,7 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 				utils.OperandLabelKey: operandName,
 			},
 			Annotations: map[string]string{
-				"kubernetes.io/description": "Additive NetworkPolicy for Multiarch Tuning Operator pod-placement operands. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for the same reason. Registry egress is granted only by the image-inspection policy on the pod-placement controller.",
+				"kubernetes.io/description": "Additive NetworkPolicy for Multiarch Tuning Operator pod-placement operands. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for the same reason. Metrics ingress is restricted to openshift-monitoring on TCP 8443. Kubelet health probes are host-networked and are not listed. Registry egress is granted only by the image-inspection policy on the pod-placement controller.",
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -63,7 +65,6 @@ func buildNetworkPolicyPodPlacement() *networkingv1.NetworkPolicy {
 				networkingv1.PolicyTypeEgress,
 			},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				healthIngressRule(),
 				metricsIngressRule(),
 				webhookIngressRule(),
 			},
@@ -144,9 +145,12 @@ func buildNetworkPolicyENoExecDaemon() *networkingv1.NetworkPolicy {
 }
 
 // buildNetworkPolicyManager returns the additive NetworkPolicy for the
-// operator manager Deployment. Peers follow the same OpenShift/OLM
-// convention as the operand policies. Image-inspection egress is omitted
-// because the manager does not inspect container images.
+// operator manager Deployment. Peers follow the same OpenShift operator
+// convention as the operand policies. Health probes on 8081 are omitted:
+// kubelet traffic is host-networked and is not filtered by NetworkPolicy.
+// Image-inspection egress is omitted because the manager does not inspect
+// container images. PolicyTypes [Ingress, Egress] isolate unmatched traffic
+// for this selector, so a separate empty deny-all policy is not required.
 func buildNetworkPolicyManager() *networkingv1.NetworkPolicy {
 	return &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -156,7 +160,7 @@ func buildNetworkPolicyManager() *networkingv1.NetworkPolicy {
 				"control-plane": "controller-manager",
 			},
 			Annotations: map[string]string{
-				"kubernetes.io/description": "Additive NetworkPolicy for the Multiarch Tuning Operator manager. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for conversion and validating admission on the manager.",
+				"kubernetes.io/description": "Additive NetworkPolicy for the Multiarch Tuning Operator manager. DNS uses the openshift-dns namespace on TCP/UDP 5353. API egress is destination-less TCP 6443 because the API server is host-networked and HCP makes pod/ClusterIP selectors unreliable. Webhook ingress is destination-less TCP 9443 for conversion and validating admission on the manager. Metrics ingress is restricted to openshift-monitoring on TCP 8443. Kubelet health probes are host-networked and are not listed.",
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
@@ -170,7 +174,6 @@ func buildNetworkPolicyManager() *networkingv1.NetworkPolicy {
 				networkingv1.PolicyTypeEgress,
 			},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				healthIngressRule(),
 				webhookIngressRule(),
 				metricsIngressRule(),
 			},
@@ -182,14 +185,9 @@ func buildNetworkPolicyManager() *networkingv1.NetworkPolicy {
 	}
 }
 
-func healthIngressRule() networkingv1.NetworkPolicyIngressRule {
-	return networkingv1.NetworkPolicyIngressRule{
-		Ports: []networkingv1.NetworkPolicyPort{
-			networkPolicyPort(corev1.ProtocolTCP, healthPort),
-		},
-	}
-}
-
+// metricsIngressRule allows Prometheus in openshift-monitoring to scrape TCP 8443.
+// This is tighter than a port-only rule; it matches console-operator, cluster-storage-operator,
+// and cluster-olm-operator rather than an unrestricted metrics port.
 func metricsIngressRule() networkingv1.NetworkPolicyIngressRule {
 	return networkingv1.NetworkPolicyIngressRule{
 		From: []networkingv1.NetworkPolicyPeer{
@@ -237,7 +235,8 @@ func dnsEgressRule() networkingv1.NetworkPolicyEgressRule {
 }
 
 func apiEgressRule() networkingv1.NetworkPolicyEgressRule {
-	// Destination-less: the API server is host-networked and HCP callers are not guest pods.
+	// Destination-less TCP 6443: the API server is host-networked and HCP callers are not guest pods.
+	// Tighter than an unrestricted egress rule; same convention as console-operator and cluster-storage-operator.
 	return networkingv1.NetworkPolicyEgressRule{
 		Ports: []networkingv1.NetworkPolicyPort{
 			networkPolicyPort(corev1.ProtocolTCP, apiPort),

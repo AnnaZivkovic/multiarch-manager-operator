@@ -97,7 +97,7 @@ func assertSharedOperandNetworkPolicy(g gomega.Gomega, np *networkingv1.NetworkP
 	g.Expect(np.Spec.PodSelector.MatchLabels).NotTo(gomega.HaveKey(utils.ControllerNameKey))
 	assertPolicyTypes(g, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(g, np)
-	assertOpenIngressPort(g, np, networkPolicyHealthPort)
+	assertNoIngressPort(g, np, networkPolicyHealthPort)
 	assertMetricsIngressFromMonitoring(g, np)
 	assertOpenIngressPort(g, np, networkPolicyWebhookPort)
 	assertDNSEgress(g, np)
@@ -137,7 +137,7 @@ func assertManagerNetworkPolicy(g gomega.Gomega, np *networkingv1.NetworkPolicy)
 	}))
 	assertPolicyTypes(g, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(g, np)
-	assertOpenIngressPort(g, np, networkPolicyHealthPort)
+	assertNoIngressPort(g, np, networkPolicyHealthPort)
 	assertOpenIngressPort(g, np, networkPolicyWebhookPort)
 	assertMetricsIngressFromMonitoring(g, np)
 	assertDNSEgress(g, np)
@@ -197,6 +197,13 @@ func assertOpenIngressPort(g gomega.Gomega, np *networkingv1.NetworkPolicy, port
 		return
 	}
 	g.Expect(true).To(gomega.BeFalse(), "missing ingress TCP %d", port)
+}
+
+func assertNoIngressPort(g gomega.Gomega, np *networkingv1.NetworkPolicy, port int32) {
+	for _, rule := range np.Spec.Ingress {
+		g.Expect(hasPort(rule.Ports, corev1.ProtocolTCP, port)).To(gomega.BeFalse(),
+			"ingress TCP %d must not be listed; kubelet probes are host-networked", port)
+	}
 }
 
 func assertMetricsIngressFromMonitoring(g gomega.Gomega, np *networkingv1.NetworkPolicy) {

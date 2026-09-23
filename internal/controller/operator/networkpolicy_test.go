@@ -30,6 +30,7 @@ import (
 )
 
 const registryPort int32 = 443
+const healthPort int32 = 8081 // kubelet host-network probes; must not appear as a NetworkPolicy rule
 
 func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	np := buildNetworkPolicyPodPlacement()
@@ -44,7 +45,7 @@ func TestBuildNetworkPolicyPodPlacement(t *testing.T) {
 	}
 	assertPolicyTypes(t, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(t, np)
-	assertIngressPort(t, np, healthPort, true)
+	assertNoIngressPort(t, np, healthPort)
 	assertIngressPortFromMonitoring(t, np, metricsPort)
 	assertIngressPort(t, np, webhookPort, true)
 	assertDNSEgress(t, np)
@@ -117,7 +118,7 @@ func TestBuildNetworkPolicyManager(t *testing.T) {
 	}
 	assertPolicyTypes(t, np, networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress)
 	assertNoIPBlock(t, np)
-	assertIngressPort(t, np, healthPort, true)
+	assertNoIngressPort(t, np, healthPort)
 	assertIngressPort(t, np, webhookPort, true)
 	assertIngressPortFromMonitoring(t, np, metricsPort)
 	assertDNSEgress(t, np)
@@ -236,6 +237,15 @@ func assertIngressPort(t *testing.T, np *networkingv1.NetworkPolicy, port int32,
 		return
 	}
 	t.Fatalf("missing ingress TCP %d", port)
+}
+
+func assertNoIngressPort(t *testing.T, np *networkingv1.NetworkPolicy, port int32) {
+	t.Helper()
+	for _, rule := range np.Spec.Ingress {
+		if hasPort(rule.Ports, corev1.ProtocolTCP, port) {
+			t.Fatalf("ingress TCP %d must not be listed; kubelet probes are host-networked", port)
+		}
+	}
 }
 
 func assertIngressPortFromMonitoring(t *testing.T, np *networkingv1.NetworkPolicy, port int32) {
