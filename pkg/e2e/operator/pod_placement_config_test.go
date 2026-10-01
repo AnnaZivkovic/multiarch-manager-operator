@@ -13,6 +13,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -110,6 +111,127 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
 			Eventually(framework.VerifyOperandNetworkPolicies(ctx, client)).Should(Succeed())
 			Eventually(framework.VerifyManagerNetworkPolicy(ctx, client)).Should(Succeed())
+		})
+		It("should remain fully functional under a namespace-wide default-deny NetworkPolicy", func() {
+			By("Deploying a default-deny NetworkPolicy BEFORE creating CPPC (proves manager startup under deny)")
+			defaultDeny := &networkingv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "default-deny-all",
+					Namespace: utils.Namespace(),
+				},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{
+						networkingv1.PolicyTypeIngress,
+						networkingv1.PolicyTypeEgress,
+					},
+				},
+			}
+			err := client.Create(ctx, defaultDeny)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				By("Cleaning up the default-deny NetworkPolicy")
+				_ = client.Delete(ctx, defaultDeny)
+			}()
+
+			By("Creating CPPC with all plugins and fallbackArchitecture under default-deny")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					WithFallbackArchitecture(utils.ArchitectureAmd64).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for all operands including ENoExec to deploy (proves manager DNS + API egress under deny)")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitOverMedium).Should(Succeed())
+
+			By("Verifying all four NetworkPolicies exist")
+			Eventually(framework.VerifyOperandNetworkPolicies(ctx, client)).Should(Succeed())
+			Eventually(framework.VerifyManagerNetworkPolicy(ctx, client)).Should(Succeed())
+			Eventually(framework.VerifyENoExecDaemonNetworkPolicy(ctx, client)).Should(Succeed())
+
+			By("Exercising webhook admission + image inspection (proves webhook ingress, controller DNS + API + registry egress)")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-default-deny").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+			), e2e.WaitMedium).Should(Succeed())
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present,
+				schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+
+			By("Exercising fallback architecture (proves image inspection failure path under deny)")
+			nsFallback := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, nsFallback)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, nsFallback)
+
+			psFallback := NewPodSpec().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				Build()
+			dFallback := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(psFallback).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-default-deny-fallback").
+				WithNamespace(nsFallback.Name).
+				Build()
+			err = client.Create(ctx, dFallback)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, nsFallback, "app", "test",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.FallbackArchitectureLabel, utils.ArchitectureAmd64,
+			), e2e.WaitMedium).Should(Succeed())
+
+			By("Verifying ENoExec daemon pods are running (proves daemon DNS + API egress under deny)")
+			Eventually(func(g Gomega) {
+				pods, err := clientset.CoreV1().Pods(utils.Namespace()).List(ctx, metav1.ListOptions{
+					LabelSelector: "app=" + utils.EnoexecDaemonSet,
+				})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pods.Items).NotTo(BeEmpty(), "enoexec daemon pods should exist")
+				for _, pod := range pods.Items {
+					g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning),
+						fmt.Sprintf("enoexec daemon pod %s should be Running", pod.Name))
+				}
+			}, e2e.WaitShort).Should(Succeed())
+
+			By("Verifying metrics services have ready endpoints (proves metrics port is serving under deny)")
+			for _, svcName := range []string{utils.PodPlacementControllerName, utils.PodPlacementWebhookName} {
+				endpoints, err := clientset.CoreV1().Endpoints(utils.Namespace()).Get(ctx, svcName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred(), "failed to get Endpoints for %s", svcName)
+				ready := 0
+				for _, subset := range endpoints.Subsets {
+					ready += len(subset.Addresses)
+				}
+				Expect(ready).To(BeNumerically(">", 0),
+					fmt.Sprintf("service %s should have at least one ready endpoint under default-deny", svcName))
+			}
+
+			By("Verifying all operands remain healthy after exercising all flows under default-deny")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("The webhook should get requests only for pods matching the namespaceSelector in the ClusterPodPlacementConfig CR", func() {
