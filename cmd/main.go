@@ -117,11 +117,9 @@ func main() {
 	leaderID := "208d7abd.multiarch.openshift.io"
 	if enableOperator {
 		leaderID = fmt.Sprintf("operator-%s", leaderID)
-		// Operand Deployments, NetworkPolicies, and related objects live only in
-		// the operator namespace and are bound by a Role. A cluster-wide informer
-		// would 403 against that Role. PodPlacementConfig stays unscoped so the
-		// operator can list it in every namespace. Pending Pods are listed via
-		// ClientSet, not this cache.
+		// NetworkPolicy is bound by a namespace-scoped Role; scope its informer
+		// to the operator namespace so the ClusterRole is not needed for it.
+		// All other types use the ClusterRole and cluster-wide informers.
 		cacheOpts.ByObject = operator.CacheByObject()
 	}
 	if enableClusterPodPlacementConfigOperandControllers {

@@ -20,52 +20,26 @@ import (
 	"fmt"
 	"testing"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
-	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
-func TestCacheByObjectScopesOperatorLocalTypes(t *testing.T) {
+func TestCacheByObjectScopesOnlyNetworkPolicy(t *testing.T) {
 	byObject := CacheByObject()
-	seen := map[string]bool{}
-	for obj, cfg := range byObject {
-		assertOperatorLocalCache(t, obj, cfg)
-		seen[fmt.Sprintf("%T", obj)] = true
+	if len(byObject) != 1 {
+		t.Fatalf("CacheByObject should scope exactly 1 type (NetworkPolicy), got %d", len(byObject))
 	}
-	for _, want := range []client.Object{
-		&appsv1.Deployment{},
-		&appsv1.DaemonSet{},
-		&corev1.Service{},
-		&corev1.ServiceAccount{},
-		&networkingv1.NetworkPolicy{},
-		&rbacv1.Role{},
-		&rbacv1.RoleBinding{},
-		&multiarchv1beta1.ENoExecEvent{},
-	} {
-		if !seen[fmt.Sprintf("%T", want)] {
-			t.Errorf("CacheByObject missing %T", want)
-		}
+	cfg, ok := lookupByType(byObject, &networkingv1.NetworkPolicy{})
+	if !ok {
+		t.Fatal("CacheByObject missing *networkingv1.NetworkPolicy")
 	}
-	for _, forbidden := range []client.Object{
-		&corev1.Pod{},
-		&multiarchv1beta1.PodPlacementConfig{},
-		&multiarchv1beta1.ClusterPodPlacementConfig{},
-		&monitoringv1.ServiceMonitor{},
-		&monitoringv1.PrometheusRule{},
-	} {
-		if seen[fmt.Sprintf("%T", forbidden)] {
-			t.Errorf("%T must not be in CacheByObject", forbidden)
-		}
-	}
+	assertOperatorLocalCache(t, &networkingv1.NetworkPolicy{}, cfg)
 }
 
 func TestAddMonitoringCache(t *testing.T) {

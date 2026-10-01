@@ -17,53 +17,26 @@ limitations under the License.
 package operator
 
 import (
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
-	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
-// CacheByObject scopes operator-local namespaced types to utils.Namespace() so
-// the informers match the namespaced Role. Do not add PodPlacementConfig (the
-// operator lists it in every namespace) or Pod (deprovision lists pending pods
-// cluster-wide via ClientSet). Do not set DefaultNamespaces on the operator
-// manager: that would also restrict PodPlacementConfig.
+// CacheByObject scopes the NetworkPolicy informer to utils.Namespace() so it
+// matches the namespace-scoped networkpolicy-role. All other types
+// (Deployments, Services, etc.) remain on the ClusterRole and use
+// cluster-wide informers.
 func CacheByObject() map[client.Object]cache.ByObject {
-	localNamespaces := map[string]cache.Config{
-		utils.Namespace(): {},
-	}
 	return map[client.Object]cache.ByObject{
-		&appsv1.Deployment{}: {
-			Namespaces: localNamespaces,
-		},
-		&appsv1.DaemonSet{}: {
-			Namespaces: localNamespaces,
-		},
-		&corev1.Service{}: {
-			Namespaces: localNamespaces,
-		},
-		&corev1.ServiceAccount{}: {
-			Namespaces: localNamespaces,
-		},
 		&networkingv1.NetworkPolicy{}: {
-			Namespaces: localNamespaces,
-		},
-		&rbacv1.Role{}: {
-			Namespaces: localNamespaces,
-		},
-		&rbacv1.RoleBinding{}: {
-			Namespaces: localNamespaces,
-		},
-		&multiarchv1beta1.ENoExecEvent{}: {
-			Namespaces: localNamespaces,
+			Namespaces: map[string]cache.Config{
+				utils.Namespace(): {},
+			},
 		},
 	}
 }
