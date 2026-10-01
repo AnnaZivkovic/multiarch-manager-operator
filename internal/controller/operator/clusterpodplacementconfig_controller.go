@@ -122,30 +122,19 @@ const (
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations,resourceNames=pod-placement-mutating-webhook-configuration,verbs=get;update;patch;delete
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations/status,verbs=get
 
-// Cluster-scoped or cross-namespace grants. Do not add namespaced operand
-// resources here; those use namespace=system below so they land in CSV
-// permissions (Role) rather than clusterPermissions (ClusterRole).
 //+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;update
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;update
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
-
-// Operand Deployments, DaemonSets, Services, ServiceAccounts, Roles,
-// RoleBindings, NetworkPolicies, and monitoring objects are created only in
-// the operator namespace (utils.Namespace()). namespace=system is the
-// kustomize placeholder rewritten to the install namespace. Keep these
-// markers aligned with CacheByObject() so informers do not list cluster-wide
-// against a namespaced Role.
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;create;delete,namespace=system
-//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get,namespace=system
-//+kubebuilder:rbac:groups=apps,resources=deployments/finalizers,verbs=update,namespace=system
-//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete,namespace=system
-//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch;create;delete,namespace=system
-//+kubebuilder:rbac:groups=core,resources=services/status,verbs=get,namespace=system
-//+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;update;patch;create;delete,namespace=system
-//+kubebuilder:rbac:groups=core,resources=serviceaccounts/status,verbs=get,namespace=system
-//+kubebuilder:rbac:groups=core,resources=serviceaccounts/finalizers,verbs=update,namespace=system
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete,namespace=system
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;create;delete
+//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
+//+kubebuilder:rbac:groups=apps,resources=deployments/finalizers,verbs=update
+//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch;create;delete
+//+kubebuilder:rbac:groups=core,resources=services/status,verbs=get
+//+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;update;patch;create;delete
+//+kubebuilder:rbac:groups=core,resources=serviceaccounts/status,verbs=get
+//+kubebuilder:rbac:groups=core,resources=serviceaccounts/finalizers,verbs=update
 
 // FIND-003: Scope RBAC write to the named operand resources.
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=create;list;watch
@@ -156,17 +145,17 @@ const (
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,resourceNames=pod-placement-controller;pod-placement-web-hook;enoexec-event-handler-controller;enoexec-event-daemon,verbs=get;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings/status,verbs=get
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings/finalizers,verbs=update
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=create;list;watch,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=pod-placement-controller;enoexec-event-handler-controller;enoexec-event-daemon,verbs=get;update;patch;delete,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles/status,verbs=get,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles/finalizers,verbs=update,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create;list;watch,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=pod-placement-controller;enoexec-event-handler-controller;enoexec-event-daemon,verbs=get;update;patch;delete,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/status,verbs=get,namespace=system
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/finalizers,verbs=update,namespace=system
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=create;list;watch
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,resourceNames=pod-placement-controller;enoexec-event-handler-controller;enoexec-event-daemon,verbs=get;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles/status,verbs=get
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles/finalizers,verbs=update
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create;list;watch
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=pod-placement-controller;enoexec-event-handler-controller;enoexec-event-daemon,verbs=get;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/status,verbs=get
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings/finalizers,verbs=update
 
-//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;update;patch;create;delete,namespace=system
-//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;update;patch;create;delete,namespace=system
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;update;patch;create;delete
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;update;patch;create;delete
 
 // Reconcile reconciles the ClusterPodPlacementConfig object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by

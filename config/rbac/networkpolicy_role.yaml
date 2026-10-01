@@ -1,0 +1,26 @@
+# permissions to manage NetworkPolicy resources in the operator namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: role
+    app.kubernetes.io/instance: networkpolicy-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: multiarch-tuning-operator
+    app.kubernetes.io/part-of: multiarch-tuning-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: networkpolicy-role
+  namespace: system
+rules:
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

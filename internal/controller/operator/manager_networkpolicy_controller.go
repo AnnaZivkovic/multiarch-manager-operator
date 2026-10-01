@@ -46,8 +46,7 @@ type ManagerNetworkPolicyReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch,namespace=system
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;get;list;patch;update;watch,namespace=system
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
 
 func (r *ManagerNetworkPolicyReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	deployment := &appsv1.Deployment{}

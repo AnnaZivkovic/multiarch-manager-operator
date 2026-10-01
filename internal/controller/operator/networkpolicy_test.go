@@ -171,35 +171,25 @@ func TestNetworkPoliciesAreCreatedInOperatorNamespace(t *testing.T) {
 	}
 }
 
-func TestNamespacedOperandRBACIsNotClusterScoped(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "rbac", "role.yaml"))
+func TestNetworkPolicyRBACIsNamespaceScoped(t *testing.T) {
+	clusterRoleData, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "rbac", "role.yaml"))
 	if err != nil {
 		t.Fatalf("read role.yaml: %v", err)
 	}
-	clusterRole, namespacedRole, ok := splitManagerRoles(string(data))
-	if !ok {
-		t.Fatal("config/rbac/role.yaml must contain both a ClusterRole and a namespaced Role")
+	if strings.Contains(string(clusterRoleData), "networkpolicies") {
+		t.Fatal("ClusterRole in role.yaml must not grant networkpolicies; use networkpolicy_role.yaml")
 	}
-	for _, resource := range []string{"networkpolicies", "deployments", "daemonsets", "servicemonitors"} {
-		if strings.Contains(clusterRole, "- "+resource) {
-			t.Errorf("ClusterRole must not grant %s; bind it on the namespaced Role", resource)
-		}
-		if !strings.Contains(namespacedRole, "- "+resource) {
-			t.Errorf("namespaced Role must grant %s", resource)
-		}
+	npRoleData, err := os.ReadFile(filepath.Join("..", "..", "..", "config", "rbac", "networkpolicy_role.yaml"))
+	if err != nil {
+		t.Fatalf("read networkpolicy_role.yaml: %v", err)
 	}
-}
-
-func splitManagerRoles(raw string) (clusterRole, namespacedRole string, ok bool) {
-	for _, doc := range strings.Split(raw, "\n---\n") {
-		switch {
-		case strings.Contains(doc, "\nkind: ClusterRole\n"):
-			clusterRole = doc
-		case strings.Contains(doc, "\nkind: Role\n"):
-			namespacedRole = doc
-		}
+	npRole := string(npRoleData)
+	if !strings.Contains(npRole, "kind: Role") {
+		t.Fatal("networkpolicy_role.yaml must be a namespaced Role, not a ClusterRole")
 	}
-	return clusterRole, namespacedRole, clusterRole != "" && namespacedRole != ""
+	if !strings.Contains(npRole, "- networkpolicies") {
+		t.Fatal("networkpolicy_role.yaml must grant networkpolicies")
+	}
 }
 
 func assertOperatorNamespace(t *testing.T, np *networkingv1.NetworkPolicy) {
