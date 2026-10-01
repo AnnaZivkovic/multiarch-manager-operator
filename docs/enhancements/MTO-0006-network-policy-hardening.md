@@ -35,7 +35,7 @@ OCP 4.16-5.x without depending on OLM NetworkPolicy support.
 Each MTO-managed workload receives a label-scoped policy that follows established OpenShift
 operator conventions for peer encoding: namespace-scoped DNS egress on TCP+UDP 5353,
 destination-less API egress on TCP 6443, namespace-scoped metrics ingress on TCP 8443, and
-MTO-specific rules for webhook ingress and image-inspection egress.
+MTO-specific rules for source-unrestricted webhook ingress and image-inspection egress.
 
 ## Motivation
 
@@ -107,6 +107,14 @@ and the older OLM constraint.
   by NetworkPolicy.
 - No `policy-group.network.openshift.io/host-network` peer. Nothing in the current MTO workloads
   needs ingress from host-network pods besides kubelet probes, which already bypass NetworkPolicy.
+- MTO does not support installing into a namespace where a default-deny policy already selects the
+  operator pods. The manager policy is created at runtime by `ManagerNetworkPolicyReconciler`,
+  which requires API access to create the policy — a pre-existing default-deny would block that
+  API egress, creating a deadlock. The platform is expected to apply namespace-wide default-deny
+  only after all operators have created their own policies (per HPSTRAT-104 rollout ordering).
+  When MTO migrates the manager policy to a static OLM bundle manifest (see Future Migration
+  section), the bundle-delivered policy will exist before the manager pod starts, removing this
+  ordering constraint.
 
 ## Proposal
 
@@ -251,9 +259,8 @@ Webhook and image-inspection rules are MTO-specific.
 
 #### Modified files
 
-- `internal/controller/operator/clusterpodplacementconfig_controller.go`: RBAC marker
-  (`namespace=system`), operand policies on the desired-objects and delete-ref lists,
-  `Owns(&networkingv1.NetworkPolicy{})`
+- `internal/controller/operator/clusterpodplacementconfig_controller.go`: operand policies on
+  the desired-objects and delete-ref lists, `Owns(&networkingv1.NetworkPolicy{})`
 - `cmd/main.go`: register `ManagerNetworkPolicyReconciler` in `RunOperator()`, add
   NetworkPolicy `cache.ByObject` entry scoped to the operator namespace
 - `pkg/utils/const.go`: policy name constants, DNS/monitoring namespace constants
@@ -288,15 +295,11 @@ Role is added for NetworkPolicy permissions only, following the same pattern as
 **New RoleBinding** (`config/rbac/networkpolicy_rolebinding.yaml`) binds the Role to the
 controller-manager ServiceAccount in the operator namespace.
 
-The kubebuilder marker uses `namespace=system` (the kustomize placeholder rewritten to the
-install namespace at deploy time):
-
-```text
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;get;list;patch;update;watch,namespace=system
-```
-
-The `namespace=system` marker appears in both `clusterpodplacementconfig_controller.go` and
-`manager_networkpolicy_controller.go`. kubebuilder deduplicates the generated role entry.
+The Role and RoleBinding are hand-maintained YAML files included in
+`config/rbac/kustomization.yaml`, following the same pattern as `leader_election_role.yaml`.
+No kubebuilder `namespace=system` marker is used — this is consistent with the project's
+convention for namespace-scoped Roles. `make manifests` regenerates only the ClusterRole
+from markers; the NetworkPolicy Role is not affected.
 
 The generated CSV includes `networking.k8s.io` permissions in the `permissions` section
 (namespace-scoped), not in `clusterPermissions`.
@@ -358,9 +361,14 @@ cluster-wide informer that the Role cannot authorize. See the Cache Scoping sect
 
 ### Graduation Criteria
 
-This enhancement ships as part of MULTIARCH-5569. No alpha/beta graduation is needed: the policies
-are additive and do not change existing behavior unless a namespace-wide deny policy is layered on
-top by the administrator.
+This enhancement ships as part of MULTIARCH-5569. No alpha/beta graduation is needed.
+
+Applying a NetworkPolicy with `PolicyTypes: [Ingress, Egress]` creates an implicit deny for
+unmatched traffic on the selected pods. This means the policies **do** restrict the network
+posture of MTO workloads as soon as they are created — only the explicitly listed flows (DNS,
+API, metrics, webhook, image-inspection) are allowed. This is the intended hardening behavior.
+All required egress and ingress paths are enumerated in the policy builders; the E2E default-deny
+test validates that no unlisted dependency exists.
 
 ### Upgrade / Downgrade Strategy
 
@@ -387,11 +395,16 @@ This enhancement does not introduce API extensions. No CRD changes, no new
 
 #### Failure Modes
 
-NetworkPolicy creation failure never blocks operator functionality. NetworkPolicy is additive
-security hardening, not a functional requirement for pod placement. On any policy creation
-failure, the reconciler logs the error and requeues for retry. No status condition is set on
-the CPPC — the failure is surfaced through logs only. The operator continues normal operation
-(pod gating, image inspection, webhook admission) regardless of whether policies exist.
+NetworkPolicy creation failure does not block operator functionality. NetworkPolicy is additive
+security hardening, not a functional requirement for pod placement. Operand NetworkPolicies are
+applied through the same `utils.ApplyResources()` batch as Deployments, Services, and RBAC.
+Because functional resources precede NetworkPolicies in the objects list, a NetworkPolicy apply
+failure occurs after the functional resources are already created. The aggregated error causes
+the reconciler to requeue (retrying all resources including the failed NetworkPolicy), but the
+operator is functional. No dedicated CPPC status condition tracks NetworkPolicy state — the
+failure is surfaced through reconciler logs and retry behavior. The operator continues normal
+operation (pod gating, image inspection, webhook admission) regardless of whether policies
+exist.
 
 Specific failure scenarios:
 
