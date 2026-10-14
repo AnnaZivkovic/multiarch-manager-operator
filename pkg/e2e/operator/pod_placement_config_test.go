@@ -252,6 +252,9 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 
 			By("Verifying operand resources and CPPC conditions after image inspection and fallback under default-deny")
 			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitShort).Should(Succeed())
+
+			By("Requesting both operand metrics endpoints over authenticated HTTPS from openshift-monitoring under default-deny")
+			verifyDefaultDenyMetrics(ctx, client, utils.Namespace())
 		})
 	})
 	Context("The webhook should get requests only for pods matching the namespaceSelector in the ClusterPodPlacementConfig CR", func() {
