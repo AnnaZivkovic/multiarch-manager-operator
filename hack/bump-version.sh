@@ -80,10 +80,6 @@ sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" bundle.Dockerfile
 sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" bundle.Dockerfile
 sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.Dockerfile
 
-sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" bundle.konflux.Dockerfile
-sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" bundle.konflux.Dockerfile
-sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.konflux.Dockerfile
-
 # Update Makefile
 sed -i "s/^VERSION ?= .*/VERSION ?= ${VERSION}/" Makefile
 

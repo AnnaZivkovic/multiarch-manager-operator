@@ -74,17 +74,18 @@ update_makefile_build_image() {
     echo "  ✅ Updated Makefile BUILD_IMAGE" >&2
 }
 
-# Update bundle.konflux.Dockerfile with Go version
-update_bundle_konflux_dockerfile() {
+# Update bundle.Dockerfile builder stage with go-toolset version
+update_bundle_dockerfile_builder() {
     local go_version="$1"
 
-    echo "Updating bundle.konflux.Dockerfile..." >&2
+    echo "Updating bundle.Dockerfile builder image..." >&2
 
-    if [[ -f bundle.konflux.Dockerfile ]]; then
-        sed_inplace "s/\(FROM\s\+brew\.registry\.redhat\.io\/rh-osbs\/openshift-golang-builder:rhel_9_\)\([0-9]\+\.[0-9]\+\)/\1${go_version}/" bundle.konflux.Dockerfile
-        echo "  ✅ Updated bundle.konflux.Dockerfile" >&2
+    if [[ -f bundle.Dockerfile ]]; then
+        # Update go-toolset version in the builder stage if present
+        sed_inplace "s/\(FROM\s\+registry\.access\.redhat\.com\/ubi9\/go-toolset:\)\([^ ]\+\)/\1${go_version}/" bundle.Dockerfile
+        echo "  ✅ Updated bundle.Dockerfile builder image" >&2
     else
-        echo "  ℹ️  bundle.konflux.Dockerfile not found, skipping" >&2
+        echo "  ℹ️  bundle.Dockerfile not found, skipping" >&2
     fi
 }
 
