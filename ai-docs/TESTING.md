@@ -7,6 +7,7 @@
 | Unit/Integration | `make unit` | `integration` | `internal/controller/*_test.go`, `pkg/*_test.go` |
 | E2E | `make e2e` | `e2e` | `pkg/e2e/` |
 | Full pipeline | `make test` | — | Runs manifests + generate + envtest + fmt + vet + goimports + gosec + lint + unit |
+| Bundle Dockerfile regression | `bash hack/test-patch-bundle-dockerfile.sh` | — | `hack/test-patch-bundle-dockerfile.sh` (separate from `make test`) |
 
 ## Running Tests
 
@@ -26,6 +27,21 @@ KUBECONFIG=/path/to/kubeconfig NAMESPACE=openshift-multiarch-tuning-operator mak
 # Run locally (not in container)
 NO_DOCKER=1 make unit
 ```
+
+### Bundle Dockerfile regression
+
+Requires Bash, Make, and local `operator-sdk` and `kustomize` binaries. Install the project's versions, then run from the repository root:
+
+```bash
+make operator-sdk kustomize
+bash hack/test-patch-bundle-dockerfile.sh
+```
+
+The script defaults to `bin/operator-sdk` and `bin/kustomize`; override `OPERATOR_SDK` and `KUSTOMIZE` with absolute binary paths if needed. It runs SDK generation in a temporary directory and cleans up on exit; no cluster or container image build is required.
+
+Coverage includes preservation of nudged image values and global `ARG`s through SDK overwrite, custom label refresh, builder COPY paths, idempotency, missing-stage failures, and rejection of `FROM builder` without an `AS builder` alias. Failure-path tests also check that `make bundle` leaves Dockerfile/config/bundle contents unchanged and removes temporary snapshots.
+
+For full generation consistency, run `make bundle-verify` in a clean checkout with generated files committed; see [Development Guide: Bundle and Catalog](DEVELOPMENT.md#bundle-and-catalog).
 
 ## Test Framework
 

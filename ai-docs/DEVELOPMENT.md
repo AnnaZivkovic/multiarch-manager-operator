@@ -85,7 +85,34 @@ make catalog-build CATALOG_IMG=<img> # Build catalog image
 make catalog-push CATALOG_IMG=<img>  # Push catalog image
 ```
 
-**Bundle verify** (`make bundle-verify`) regenerates the bundle and runs `verify-diff` to ensure deterministic output. It preserves `createdAt` timestamps in CSV files (Makefile lines 346-361).
+**Builder preservation:** `bundle.Dockerfile` is the source of truth for the builder stage, including its base image and operator image digest. `make bundle` snapshots it before SDK generation, then `hack/patch-bundle-dockerfile.sh` restores the builder stage and global declarations before the first `FROM` (including `ARG`s). Konflux-nudged values remain unchanged; SDK metadata/core labels and custom labels still refresh, and bundle COPY instructions use `--from=builder`. Change builder instructions in `bundle.Dockerfile`, not in the patch script.
+
+A named `AS builder` stage is required (case-insensitive); `FROM builder` alone names an image, not a stage. Missing builder alias causes `make bundle` to fail before generators run, without changing generated files.
+
+### Use a custom operator image locally
+
+Pass the same `IMG` to generation and build:
+
+```bash
+make bundle IMG=quay.io/your-user/operator:dev
+make bundle-build IMG=quay.io/your-user/operator:dev \
+  BUNDLE_IMG=quay.io/your-user/operator-bundle:dev
+```
+
+`make bundle IMG=...` updates operator image references in generated manifests and the image annotation in `config/manager`; it does not change the preserved Dockerfile's `ARG IMG` default. `make bundle-build` passes Makefile `IMG` explicitly as a build argument, overriding that Dockerfile default. `BUNDLE_IMG` names the output bundle image, not the operator image.
+
+`ORIGINAL_IMG` is a Dockerfile build argument identifying the image reference to replace, not a Makefile override. To replace references at build time without regenerating manifests, use the container builder directly:
+
+```bash
+podman build -f bundle.Dockerfile \
+  --build-arg ORIGINAL_IMG=registry.ci.openshift.org/origin/multiarch-tuning-operator:main \
+  --build-arg IMG=quay.io/your-user/operator:dev \
+  -t quay.io/your-user/operator-bundle:dev .
+```
+
+If manifests already contain the custom image, build-time replacement skips when `ORIGINAL_IMG` is absent. Setting `make bundle ORIGINAL_IMG=...` has no effect.
+
+**Bundle verify** (`make bundle-verify`) regenerates the bundle and runs `verify-diff` to ensure deterministic output. It preserves `createdAt` timestamps in CSV files. Run with committed generated files and a clean working tree; intentional custom-image changes will otherwise appear as differences.
 
 ## Deployment
 
