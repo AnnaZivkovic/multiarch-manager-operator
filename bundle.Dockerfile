@@ -1,12 +1,15 @@
 FROM registry.access.redhat.com/ubi9/go-toolset:1.26.7 as builder
-ARG IMG=registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator@sha256:5a82186a034fb6404a710e6c1b5e252d6bb07d2a62e43125e74cc019c054cc47
-ARG ORIGINAL_IMG=registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+ARG IMG=registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator@sha256:7137ca86e945ed9e288cb5f2439658564167f791b34203e87b4c021d7dd1ce34
+ARG ORIGINAL_IMG=registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
 USER 0
 WORKDIR /code
 COPY bundle/ bundle/
 
 # Replace the bundle image in the repository with the one specified by the IMG build argument.
 RUN chmod -R g+rwX bundle/ && \
+    if [ -z "${IMG}" ] || [ -z "${ORIGINAL_IMG}" ]; then \
+        echo "IMG and ORIGINAL_IMG build arguments must not be empty" && exit 1; \
+    fi; \
     if grep -rq "${ORIGINAL_IMG}" bundle/; then \
         find bundle -type f -exec sed -i "s|${ORIGINAL_IMG}|${IMG}|g" {} \+ ; \
         if grep -rq "${ORIGINAL_IMG}" bundle/; then \
