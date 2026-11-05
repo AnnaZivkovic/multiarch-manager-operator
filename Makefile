@@ -370,7 +370,7 @@ bundle-verify:
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
-	$(ENGINE) build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+	$(ENGINE) build -f bundle.Dockerfile --build-arg IMG="$(IMG)" -t $(BUNDLE_IMG) .
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.

@@ -7,6 +7,9 @@ COPY bundle/ bundle/
 
 # Replace the bundle image in the repository with the one specified by the IMG build argument.
 RUN chmod -R g+rwX bundle/ && \
+    if [ -z "${IMG}" ] || [ -z "${ORIGINAL_IMG}" ]; then \
+        echo "IMG and ORIGINAL_IMG build arguments must not be empty" && exit 1; \
+    fi; \
     if grep -rq "${ORIGINAL_IMG}" bundle/; then \
         find bundle -type f -exec sed -i "s|${ORIGINAL_IMG}|${IMG}|g" {} \+ ; \
         if grep -rq "${ORIGINAL_IMG}" bundle/; then \
