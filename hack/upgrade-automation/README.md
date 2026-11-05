@@ -48,7 +48,7 @@ Updates all container image references with Go minor version (e.g., 1.24.11 → 
 - `.tekton/*.yaml` - Konflux pipelines: `rhel_9_{go}`
 - `Dockerfile` - Base image: `FROM golang:{go}`
 - `Makefile` - BUILD_IMAGE variable
-- `bundle.konflux.Dockerfile`, `konflux.Dockerfile` - Konflux builders
+- `bundle.Dockerfile`, `konflux.Dockerfile` - Konflux builders
 
 **Commit:** `Update Makefile and Dockerfiles to use the new Golang version base image to {go_minor}`
 
@@ -201,7 +201,7 @@ sed_inplace() {
 | `update_tekton_files()` | .tekton/*.yaml | rhel_9_X.Y |
 | `update_dockerfile()` | Dockerfile | FROM golang:X.Y |
 | `update_makefile_build_image()` | Makefile | BUILD_IMAGE |
-| `update_bundle_konflux_dockerfile()` | bundle.konflux.Dockerfile | rhel_9_X.Y |
+| `update_bundle_dockerfile_builder()` | bundle.Dockerfile | go-toolset:X.Y |
 | `update_konflux_dockerfile()` | konflux.Dockerfile | rhel_9_X.Y |
 | `update_go_mod_directive()` | go.mod | go X.Y |
 | `update_makefile_tool_versions()` | Makefile | 5 tool variables |

@@ -7,8 +7,8 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "main" && ("bundle/***".pathChanged() || ".tekton/***".pathChanged() || "bundle.konflux.Dockerfile".pathChanged()
-      || "trigger-konflux-builds.txt".pathChanged() )
+      == "main" && ("bundle/***".pathChanged() || ".tekton/***".pathChanged() || "bundle.Dockerfile".pathChanged()
+      || "hack/patch-bundle-dockerfile.sh".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: multiarch-tuning-operator
@@ -21,7 +21,7 @@ spec:
   - name: artifact-type
     value: operatorbundle
   - name: dockerfile
-    value: bundle.konflux.Dockerfile
+    value: bundle.Dockerfile
   - name: git-url
     value: '{{source_url}}'
   - name: output-image

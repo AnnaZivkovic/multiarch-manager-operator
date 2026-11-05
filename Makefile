@@ -360,10 +360,6 @@ bundle-verify:
 		sed -i 's/createdAt: .*$$/createdAt: "'$${created_at}'"/' bundle/manifests/$${file%.created-at}; \
 	done
 	rm -f ./*.clusterserviceversion.yaml.created-at
-	@echo "#########################################################################################################"
-	@echo "#### Verifying that the bundle.konflux.Dockerfile labels are in sync with the bundle.Dockerfile ones ####"
-	@echo "#########################################################################################################"
-	diff <(grep ^LABEL bundle.konflux.Dockerfile | sort) <(grep ^LABEL bundle.Dockerfile | sort)
 	@echo "################################################################################################"
 	@echo "#### Verifying no other files changed in the working tree after the bundle generation test #####"
 	@echo "################################################################################################"
@@ -374,7 +370,7 @@ bundle-verify:
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
-	$(ENGINE) build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+	$(ENGINE) build -f bundle.Dockerfile --build-arg IMG="$(IMG)" -t $(BUNDLE_IMG) .
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
