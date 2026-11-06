@@ -31,9 +31,14 @@ BUILDER_SOURCE=${1:-bundle.Dockerfile}
 TEMP_FILE=$(mktemp)
 trap 'rm -f "$TEMP_FILE"' EXIT
 awk '
+    !seen_from && toupper($1) != "FROM" { preamble = preamble $0 ORS; next }
     toupper($1) == "FROM" {
+        seen_from = 1
         if (builder) exit
-        if (tolower($NF) == "builder") builder = 1
+        if (NF >= 4 && toupper($(NF-1)) == "AS" && tolower($NF) == "builder") {
+            builder = 1
+            printf "%s", preamble
+        }
     }
     builder { print }
 ' "$BUILDER_SOURCE" > "$TEMP_FILE"

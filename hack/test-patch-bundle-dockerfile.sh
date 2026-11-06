@@ -14,9 +14,13 @@ cp "$script_dir/patch-bundle-dockerfile.sh" "$tmp_dir/"
 cd "$tmp_dir"
 
 # Konflux may nudge both the builder base image and the operator digest.
-sed -e '1c\FROM registry.example.com/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa as builder' \
-    -e 's|^ARG IMG=.*|ARG IMG=registry.example.com/operator@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb|' \
-    bundle.Dockerfile > saved.Dockerfile
+{
+    printf 'ARG BASE=registry.example.com/builder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+    printf 'ARG BUILDPLATFORM=linux/amd64\n'
+    sed -e '1c\FROM --platform=${BUILDPLATFORM} ${BASE} AS builder' \
+        -e 's|^ARG IMG=.*|ARG IMG=registry.example.com/operator@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb|' \
+        bundle.Dockerfile
+} > saved.Dockerfile
 cp saved.Dockerfile bundle.Dockerfile
 sed '/^FROM scratch/,$d' saved.Dockerfile > expected-builder
 
@@ -26,7 +30,7 @@ sed '/^FROM scratch/,$d' saved.Dockerfile > expected-builder
 VERSION=1.4.0 ./patch-bundle-dockerfile.sh saved.Dockerfile
 sed '/^FROM scratch/,$d' bundle.Dockerfile > actual-builder
 diff -u expected-builder actual-builder
-[[ "$(grep -c '^FROM .* as builder$' bundle.Dockerfile)" -eq 1 ]]
+[[ "$(grep -ic '^FROM .* as builder$' bundle.Dockerfile)" -eq 1 ]]
 grep -qFx 'COPY --from=builder /code/bundle/manifests /manifests/' bundle.Dockerfile
 grep -qFx 'COPY --from=builder /code/bundle/metadata /metadata/' bundle.Dockerfile
 grep -qFx 'COPY --from=builder /code/bundle/tests/scorecard /tests/scorecard/' bundle.Dockerfile
@@ -79,3 +83,30 @@ diff -r original-config config
 diff -r original-bundle bundle
 [[ -z "$(ls -A snapshots)" ]]
 grep -q 'No builder stage found' make-bundle.log
+
+# An image named builder is not a stage alias, even with global ARGs present.
+cat > bundle.Dockerfile <<'EOF'
+ARG BASE=scratch
+FROM builder
+RUN true
+
+FROM scratch
+COPY bundle/manifests /manifests/
+EOF
+cp bundle.Dockerfile image-named-builder.Dockerfile
+if TMPDIR="$PWD/snapshots" make -o manifests -o kustomize -o operator-sdk bundle \
+    OPERATOR_SDK="$sdk" KUSTOMIZE="$kustomize" > make-bundle.log 2>&1; then
+    echo 'Expected make bundle to reject an image named builder' >&2
+    exit 1
+fi
+cmp image-named-builder.Dockerfile bundle.Dockerfile
+diff -r original-config config
+diff -r original-bundle bundle
+[[ -z "$(ls -A snapshots)" ]]
+grep -q '^No builder stage found in bundle.Dockerfile$' make-bundle.log
+
+if VERSION=1.4.0 ./patch-bundle-dockerfile.sh; then
+    echo 'Expected patch script to reject an image named builder' >&2
+    exit 1
+fi
+cmp image-named-builder.Dockerfile bundle.Dockerfile
