@@ -62,7 +62,7 @@ spec:
     name: build-args-file
     type: string
   - default:
-    - localhost
+    - linux/x86_64
     - linux/arm64
     - linux/ppc64le
     - linux/s390x
