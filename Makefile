@@ -329,13 +329,20 @@ $(OPERATOR_SDK): $(LOCALBIN)
 	}
 
 .PHONY: bundle
-bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
-	$(OPERATOR_SDK) generate kustomize manifests -q
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
-	cd config/manager && $(KUSTOMIZE) edit set annotation multiarch.openshift.io/image:$(IMG)
-	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
-	$(OPERATOR_SDK) bundle validate ./bundle
-	VERSION=$(VERSION) hack/patch-bundle-dockerfile.sh
+bundle: ## Generate bundle manifests and metadata, then validate generated files.
+	@set -e; \
+		dockerfile=$$(mktemp); \
+		trap 'rm -f "$$dockerfile"' EXIT; \
+		cp bundle.Dockerfile "$$dockerfile"; \
+		awk 'toupper($$1) == "FROM" && NF >= 4 && toupper($$(NF-1)) == "AS" && tolower($$NF) == "builder" { found = 1; exit } END { exit !found }' "$$dockerfile" || \
+			{ echo "No builder stage found in bundle.Dockerfile" >&2; exit 1; }; \
+		$(MAKE) manifests kustomize operator-sdk; \
+		$(OPERATOR_SDK) generate kustomize manifests -q; \
+		(cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)); \
+		(cd config/manager && $(KUSTOMIZE) edit set annotation multiarch.openshift.io/image:$(IMG)); \
+		$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS); \
+		$(OPERATOR_SDK) bundle validate ./bundle; \
+		VERSION=$(VERSION) hack/patch-bundle-dockerfile.sh "$$dockerfile"
 
 .PHONY: bundle-verify
 bundle-verify:
