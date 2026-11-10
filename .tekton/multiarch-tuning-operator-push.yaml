@@ -20,29 +20,28 @@ metadata:
   namespace: multiarch-tuning-ope-tenant
 spec:
   params:
-    - name: dockerfile
-      value: konflux.Dockerfile
-      # TODO: change to Dockerfile when https://issues.redhat.com/browse/KONFLUX-2361
-    - name: git-url
-      value: '{{source_url}}'
-    - name: output-image
-      value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-v1-x:{{revision}}
-    - name: path-context
-      value: .
-    - name: revision
-      value: '{{revision}}'
-    - name: build-platforms
-      value:
-        - linux/amd64
-        - linux/arm64
-        - linux/ppc64le
-        - linux/s390x
-    - name: hermetic
-      value: "true"
-    - name: prefetch-input
-      value: '{"packages": [{"type": "gomod"}], "flags": ["gomod-vendor-check"]}'
-    - name: build-source-image
-      value: "true"
+  - name: dockerfile
+    value: konflux.Dockerfile
+  - name: git-url
+    value: '{{source_url}}'
+  - name: output-image
+    value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-v1-x:{{revision}}
+  - name: path-context
+    value: .
+  - name: revision
+    value: '{{revision}}'
+  - name: build-platforms
+    value:
+    - linux/x86_64
+    - linux/arm64
+    - linux/ppc64le
+    - linux/s390x
+  - name: hermetic
+    value: "true"
+  - name: prefetch-input
+    value: '{"packages": [{"type": "gomod", "path": "."}], "flags": ["gomod-vendor-check"]}'
+  - name: build-source-image
+    value: "true"
   pipelineRef:
     resolver: git
     params:
