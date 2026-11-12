@@ -13,9 +13,52 @@
 make build                  # Local build (requires gpgme-devel, CGO_ENABLED=1)
 make docker-build IMG=<img> # Single-arch container image
 make docker-buildx IMG=<img> # Multi-arch image (linux/arm64,linux/amd64)
+make rpm-lockfile           # Regenerate rpms.lock.yaml for Konflux hermetic builds
 ```
 
 **Containerized vs local execution:** `make build` compiles the binary on the host. Targets that use `DOCKER_CMD` run inside a container (`BUILD_IMAGE`) by default; set `NO_DOCKER=1` in the environment or `.env` file to run those targets locally. See `dotenv.example` for all options.
+
+## Operator Image Build (Dockerfile)
+
+The standard `Dockerfile` is the single build definition for local, CI and
+Konflux builds (consolidated in MULTIARCH-6532). It builds `manager` and
+`enoexec-daemon` with `CGO_ENABLED=1` and `GOEXPERIMENT=strictfipsruntime` on
+the `ubi9/go-toolset` builder (a Red Hat toolchain — upstream `golang` images
+do **not** support the `strictfipsruntime` experiment) and runs on
+`ubi9/ubi-minimal` as non-root user `65532:65532`.
+
+**gpgme-devel dependency:** the builder stage installs `gpgme-devel` from the
+public UBI 9 CodeReady Builder repository. Locally this resolves online from
+the public UBI CDN; no Red Hat entitlement is needed. In Konflux hermetic
+builds the RPMs come from the prefetched local repository instead (below).
+
+### Konflux Hermetic RPM Prefetching
+
+The Konflux operator PipelineRuns (`.tekton/multiarch-tuning-operator-{pull-request,push}.yaml`)
+prefetch both Go modules and RPMs (`prefetch-input` contains a `gomod` and an
+`rpm` entry). The RPM inputs live at the repository root:
+
+- `rpms.in.yaml` — packages to resolve (`gpgme-devel`), target arches
+  (x86_64, aarch64, ppc64le, s390x) and the builder image used as resolution
+  context (`ubi9/go-toolset`)
+- `rpms.lock.yaml` — generated lockfile with the pinned RPMs and SRPMs
+  (everything not already installed in the builder image)
+- `ubi9.repo` — public UBI 9 repository definitions used for resolution
+
+During the hermetic build the pipeline mounts the prefetched RPMs as a local
+repository over `/etc/yum.repos.d`, so the `dnf install -y gpgme-devel` in the
+Dockerfile works unchanged without network access.
+
+**Regenerating the lockfile** (required whenever the builder image version
+changes, packages are added/removed, or dependencies drift):
+
+```bash
+make rpm-lockfile
+```
+
+This requires the [rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype)
+tool with system dnf bindings and network access to the public UBI CDN. The
+lockfile is always regenerated with the tool — never hand-edited.
 
 ## Code Quality Pipeline
 

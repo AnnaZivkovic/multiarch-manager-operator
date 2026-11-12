@@ -160,7 +160,7 @@ validate_prerequisites() {
     local current_go current_k8s current_ocp
     current_go=$(grep '^go ' go.mod | awk '{print $2}')
     current_k8s=$(grep 'k8s.io/api' go.mod | head -1 | awk '{print $2}')
-    current_ocp=$(grep 'BUILD_IMAGE' Makefile | grep -oP 'openshift-\K[0-9]+\.[0-9]+')
+    current_ocp=$(grep -E '^\s*tag:' .ci-operator.yaml 2>/dev/null | grep -oP 'openshift-\K[0-9]+\.[0-9]+' || echo "unknown")
 
     echo "Current versions:" >&2
     echo "  Go: $current_go" >&2

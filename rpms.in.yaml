@@ -1,0 +1,8 @@
+packages:
+  - gpgme-devel
+arches: [x86_64, aarch64, ppc64le, s390x]
+context:
+  image: registry.access.redhat.com/ubi9/go-toolset:1.26
+contentOrigin:
+  repofiles:
+    - ./ubi9.repo

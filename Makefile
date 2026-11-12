@@ -252,6 +252,11 @@ docker-buildx: manifests generate ## Build and push docker image for the manager
 	- [ -f .persistent-buildx ] || docker buildx rm project-v3-builder
 	# rm Dockerfile.cross
 
+
+.PHONY: rpm-lockfile
+rpm-lockfile: ## Regenerate rpms.lock.yaml for Konflux hermetic RPM prefetching
+	rpm-lockfile-prototype rpms.in.yaml
+
 ##@ Deployment
 
 ifndef ignore-not-found

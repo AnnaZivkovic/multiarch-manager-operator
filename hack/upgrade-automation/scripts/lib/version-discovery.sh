@@ -88,13 +88,23 @@ discover_required_ocp_version() {
     return 1
 }
 
-# Discover target OCP version from current BUILD_IMAGE
+# Discover current OCP version from the .ci-operator.yaml build root image tag
 discover_current_ocp_version() {
     local current_ocp_version
-    current_ocp_version=$(grep 'BUILD_IMAGE' Makefile | grep -oP 'openshift-\K[0-9]+\.[0-9]+')
+
+    if [[ -f .ci-operator.yaml ]]; then
+        current_ocp_version=$(grep -E '^\s*tag:' .ci-operator.yaml | grep -oP 'openshift-\K[0-9]+\.[0-9]+')
+    fi
+
+    # Fallback: legacy Makefile BUILD_IMAGE layout
+    if [[ -z "$current_ocp_version" ]] && grep -q 'BUILD_IMAGE' Makefile; then
+        current_ocp_version=$(grep 'BUILD_IMAGE' Makefile | grep -oP 'openshift-\K[0-9]+\.[0-9]+')
+    fi
 
     if [[ -z "$current_ocp_version" ]]; then
-        echo "ERROR: Could not extract OCP version from BUILD_IMAGE in Makefile" >&2
+        echo "ERROR: Could not extract the current OCP version" >&2
+        echo "  Checked: .ci-operator.yaml build root tag (rhel-9-golang-X.Y-openshift-Z.Z)" >&2
+        echo "           and the legacy Makefile BUILD_IMAGE" >&2
         return 1
     fi
 

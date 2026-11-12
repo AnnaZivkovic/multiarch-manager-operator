@@ -258,9 +258,12 @@ pipelinesascode.tekton.dev/on-cel-expression: |
    "api/***".pathChanged() || 
    "internal/***".pathChanged() || 
    "pkg/***".pathChanged() || 
-   "test/***".pathChanged() || 
-   "konflux.Dockerfile".pathChanged() || 
-   "go.mod".pathChanged() || 
+   "test/***".pathChanged() ||
+   "Dockerfile".pathChanged() ||
+   "rpms.in.yaml".pathChanged() ||
+   "rpms.lock.yaml".pathChanged() ||
+   "ubi9.repo".pathChanged() ||
+   "go.mod".pathChanged() ||
    "cmd/***".pathChanged() || 
    "go.sum".pathChanged() || 
    "bundle/***".pathChanged() ||           # ← Bundle changes trigger operator build
