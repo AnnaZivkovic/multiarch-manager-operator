@@ -45,10 +45,15 @@ The script executes 6 sequential steps, creating a git commit for each:
 
 Updates all container image references with Go minor version (e.g., 1.24.11 → 1.24):
 - `.ci-operator.yaml` - CI builder: `rhel-9-golang-{go}-openshift-{ocp}`
-- `.tekton/*.yaml` - Konflux pipelines: `rhel_9_{go}`
-- `Dockerfile` - Base image: `FROM golang:{go}`
+- `.tekton/*.yaml` - Konflux pipelines: `go-toolset:{go}` (script runner images) and legacy `rhel_9_{go}` (Brew builder)
+- `Dockerfile` - Builder image: `ARG BUILD_IMAGE=...ubi9/go-toolset:{go}`
 - `Makefile` - BUILD_IMAGE variable
 - `bundle.Dockerfile`, `konflux.Dockerfile` - Konflux builders
+- `rpms.in.yaml` - RPM resolution context image, followed by regeneration of `rpms.lock.yaml` (`make rpm-lockfile`; requires the [rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype) tool and network access to the public UBI CDN)
+
+Every update verifies that the expected reference was actually modified and fails
+visibly if a target file no longer matches (see `verify_contains` in
+`scripts/lib/file-updates.sh`), so an expected update can never silently match nothing.
 
 **Commit:** `Update Makefile and Dockerfiles to use the new Golang version base image to {go_minor}`
 
@@ -198,13 +203,31 @@ sed_inplace() {
 | Function | File(s) Updated | Pattern |
 |----------|-----------------|---------|
 | `update_ci_operator_yaml()` | .ci-operator.yaml | rhel-9-golang-X.Y-openshift-X.Y |
-| `update_tekton_files()` | .tekton/*.yaml | rhel_9_X.Y |
-| `update_dockerfile()` | Dockerfile | FROM golang:X.Y |
-| `update_makefile_build_image()` | Makefile | BUILD_IMAGE |
+| `update_tekton_files()` | .tekton/*.yaml | go-toolset:X.Y and rhel_9_X.Y |
+| `update_dockerfile()` | Dockerfile | ARG BUILD_IMAGE=...go-toolset:X.Y |
+| `update_makefile_build_image()` | Makefile | BUILD_IMAGE (go-toolset:X.Y, legacy OCP builder) |
 | `update_bundle_dockerfile_builder()` | bundle.Dockerfile | go-toolset:X.Y |
-| `update_konflux_dockerfile()` | konflux.Dockerfile | rhel_9_X.Y |
+| `update_konflux_dockerfile()` | konflux.Dockerfile (legacy, see MULTIARCH-6540) | rhel_9_X.Y |
+| `update_rpms_in_yaml()` | rpms.in.yaml | context image go-toolset:X.Y |
+| `update_rpms_lockfile()` | rpms.lock.yaml | regenerated with rpm-lockfile-prototype |
 | `update_go_mod_directive()` | go.mod | go X.Y |
 | `update_makefile_tool_versions()` | Makefile | 5 tool variables |
+
+All update functions assert their expected postcondition via `verify_contains()`
+and return a non-zero exit code when a target file is missing or no longer
+matches the expected layout.
+
+### Tests
+
+Run the file-update tests with:
+
+```bash
+bash hack/upgrade-automation/tests/test-file-updates.sh
+```
+
+The tests cover both the successful-update paths (using fixtures that mirror
+the repository layout) and the failure paths where an expected update target
+is missing or unrecognized and the function must fail visibly.
 
 ### Library: `scripts/lib/validations.sh` (130 lines)
 

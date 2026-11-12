@@ -4,10 +4,14 @@ FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
 
+ENV GOEXPERIMENT=strictfipsruntime
+
 # Switch to root to install gpgme-devel, which is required for CGO compilation of the
 # containers/image library used for registry authentication and image inspection.
 # This only affects the builder stage (used during compilation) and does not impact the
 # security of the final runtime image, which runs as USER 65532:65532 (non-root).
+# gpgme-devel comes from the public UBI 9 CodeReady Builder repository: in local builds
+# dnf resolves it online, in Konflux hermetic builds from the prefetched rpms.lock.yaml.
 USER 0
 RUN if ! pkg-config --exists gpgme 2>/dev/null; then \
         if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
@@ -42,11 +46,12 @@ FROM ${RUNTIME_IMAGE}
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/enoexec-daemon .
+COPY LICENSE /licenses/license.txt
 
 USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
-LABEL name="multiarch-tuning/multiarch-tuning-operator"
+LABEL name="multiarch-tuning/multiarch-tuning-rhel9-operator"
 LABEL release="1.4.1"
 LABEL version="1.4.1"
 LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.4::el9"
