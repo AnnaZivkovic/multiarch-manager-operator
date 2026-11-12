@@ -8,7 +8,7 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "pull_request" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "cmd/***".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
+      event == "pull_request" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "Dockerfile".pathChanged() || "rpms.in.yaml".pathChanged() || "rpms.lock.yaml".pathChanged() || "ubi9.repo".pathChanged() || "go.mod".pathChanged() || "cmd/***".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: multiarch-tuning-operator-v1-x
@@ -19,7 +19,7 @@ metadata:
 spec:
   params:
   - name: dockerfile
-    value: konflux.Dockerfile
+    value: Dockerfile
   - name: git-url
     value: '{{source_url}}'
   - name: image-expires-after
@@ -39,7 +39,7 @@ spec:
   - name: hermetic
     value: "true"
   - name: prefetch-input
-    value: '{"packages": [{"type": "gomod", "path": "."}], "flags": ["gomod-vendor-check"]}'
+    value: '{"packages": [{"type": "gomod", "path": "."}, {"type": "rpm", "path": "."}], "flags": ["gomod-vendor-check"]}'
   - name: build-source-image
     value: "true"
   pipelineRef:

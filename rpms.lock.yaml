@@ -1,0 +1,124 @@
+---
+lockfileVersion: 1
+lockfileVendor: redhat
+arches:
+- arch: aarch64
+  packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/codeready-builder/os/Packages/g/gpgme-devel-1.15.1-6.el9.aarch64.rpm
+    repoid: codeready-builder-for-ubi-9-aarch64-rpms
+    size: 169701
+    checksum: sha256:fd33333376d49ad4260b7d1d3244b776e7152285a008a1b8dc0bb4ea0679e67d
+    name: gpgme-devel
+    evr: 1.15.1-6.el9
+    sourcerpm: gpgme-1.15.1-6.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/codeready-builder/os/Packages/l/libassuan-devel-2.5.5-3.el9.aarch64.rpm
+    repoid: codeready-builder-for-ubi-9-aarch64-rpms
+    size: 66558
+    checksum: sha256:6d9f0d4616ac24b91eea9207b5ca5a742c634bf786ef044a4f712c3916d0d5bd
+    name: libassuan-devel
+    evr: 2.5.5-3.el9
+    sourcerpm: libassuan-2.5.5-3.el9.src.rpm
+  source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/g/gpgme-1.15.1-6.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 1737968
+    checksum: sha256:ceeb7d42bc8ddf6f09013439bfed4e591411b81293fe3db5e4edb06cbe1879fb
+    name: gpgme
+    evr: 1.15.1-6.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/aarch64/baseos/source/SRPMS/Packages/l/libassuan-2.5.5-3.el9.src.rpm
+    repoid: ubi-9-for-aarch64-baseos-source-rpms
+    size: 586136
+    checksum: sha256:dcc858194f9497ec86960651fa76413a9c731f94423d67298e8e3c0c7a5e7806
+    name: libassuan
+    evr: 2.5.5-3.el9
+  module_metadata: []
+- arch: ppc64le
+  packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/ppc64le/codeready-builder/os/Packages/g/gpgme-devel-1.15.1-6.el9.ppc64le.rpm
+    repoid: codeready-builder-for-ubi-9-ppc64le-rpms
+    size: 172752
+    checksum: sha256:124babb289b920adfa45e21a34d4cecfabe4724ad1db5b1d5695dd03522c9f6c
+    name: gpgme-devel
+    evr: 1.15.1-6.el9
+    sourcerpm: gpgme-1.15.1-6.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/ppc64le/codeready-builder/os/Packages/l/libassuan-devel-2.5.5-3.el9.ppc64le.rpm
+    repoid: codeready-builder-for-ubi-9-ppc64le-rpms
+    size: 66609
+    checksum: sha256:31a7ff8168751c7bcd963baa8ebea742a7ef8f3b6bbf8322c0856863478158a7
+    name: libassuan-devel
+    evr: 2.5.5-3.el9
+    sourcerpm: libassuan-2.5.5-3.el9.src.rpm
+  source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/ppc64le/baseos/source/SRPMS/Packages/g/gpgme-1.15.1-6.el9.src.rpm
+    repoid: ubi-9-for-ppc64le-baseos-source-rpms
+    size: 1737968
+    checksum: sha256:ceeb7d42bc8ddf6f09013439bfed4e591411b81293fe3db5e4edb06cbe1879fb
+    name: gpgme
+    evr: 1.15.1-6.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/ppc64le/baseos/source/SRPMS/Packages/l/libassuan-2.5.5-3.el9.src.rpm
+    repoid: ubi-9-for-ppc64le-baseos-source-rpms
+    size: 586136
+    checksum: sha256:dcc858194f9497ec86960651fa76413a9c731f94423d67298e8e3c0c7a5e7806
+    name: libassuan
+    evr: 2.5.5-3.el9
+  module_metadata: []
+- arch: s390x
+  packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/s390x/codeready-builder/os/Packages/g/gpgme-devel-1.15.1-6.el9.s390x.rpm
+    repoid: codeready-builder-for-ubi-9-s390x-rpms
+    size: 170422
+    checksum: sha256:91216900e73b26ef1dbd4b4ce2b7dfc01f10cd4e7deeda09764e64d196742e7f
+    name: gpgme-devel
+    evr: 1.15.1-6.el9
+    sourcerpm: gpgme-1.15.1-6.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/s390x/codeready-builder/os/Packages/l/libassuan-devel-2.5.5-3.el9.s390x.rpm
+    repoid: codeready-builder-for-ubi-9-s390x-rpms
+    size: 66579
+    checksum: sha256:a3d86f463997a9d1eae9c266c70cf1c6a4212c3614da0802243ce4f1fd82dfa6
+    name: libassuan-devel
+    evr: 2.5.5-3.el9
+    sourcerpm: libassuan-2.5.5-3.el9.src.rpm
+  source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/s390x/baseos/source/SRPMS/Packages/g/gpgme-1.15.1-6.el9.src.rpm
+    repoid: ubi-9-for-s390x-baseos-source-rpms
+    size: 1737968
+    checksum: sha256:ceeb7d42bc8ddf6f09013439bfed4e591411b81293fe3db5e4edb06cbe1879fb
+    name: gpgme
+    evr: 1.15.1-6.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/s390x/baseos/source/SRPMS/Packages/l/libassuan-2.5.5-3.el9.src.rpm
+    repoid: ubi-9-for-s390x-baseos-source-rpms
+    size: 586136
+    checksum: sha256:dcc858194f9497ec86960651fa76413a9c731f94423d67298e8e3c0c7a5e7806
+    name: libassuan
+    evr: 2.5.5-3.el9
+  module_metadata: []
+- arch: x86_64
+  packages:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/codeready-builder/os/Packages/g/gpgme-devel-1.15.1-6.el9.x86_64.rpm
+    repoid: codeready-builder-for-ubi-9-x86_64-rpms
+    size: 170873
+    checksum: sha256:864381afbdbdcf4a625a14643b5775a5b9b6b0724c342cd743a2dc350aedddd2
+    name: gpgme-devel
+    evr: 1.15.1-6.el9
+    sourcerpm: gpgme-1.15.1-6.el9.src.rpm
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/codeready-builder/os/Packages/l/libassuan-devel-2.5.5-3.el9.x86_64.rpm
+    repoid: codeready-builder-for-ubi-9-x86_64-rpms
+    size: 66633
+    checksum: sha256:232bccdb2c45f2ceafae2fa138c18d6aba5c953d9eee0aab2f8fc078b9b4b4a4
+    name: libassuan-devel
+    evr: 2.5.5-3.el9
+    sourcerpm: libassuan-2.5.5-3.el9.src.rpm
+  source:
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/g/gpgme-1.15.1-6.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 1737968
+    checksum: sha256:ceeb7d42bc8ddf6f09013439bfed4e591411b81293fe3db5e4edb06cbe1879fb
+    name: gpgme
+    evr: 1.15.1-6.el9
+  - url: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/x86_64/baseos/source/SRPMS/Packages/l/libassuan-2.5.5-3.el9.src.rpm
+    repoid: ubi-9-for-x86_64-baseos-source-rpms
+    size: 586136
+    checksum: sha256:dcc858194f9497ec86960651fa76413a9c731f94423d67298e8e3c0c7a5e7806
+    name: libassuan
+    evr: 2.5.5-3.el9
+  module_metadata: []
