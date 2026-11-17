@@ -170,26 +170,6 @@ update_bundle_dockerfile_builder() {
     echo "  ✅ Updated bundle.Dockerfile builder image" >&2
 }
 
-# Update konflux.Dockerfile with Go version
-# Legacy file (Konflux builds use Dockerfile since MULTIARCH-6532); update as long as it exists.
-update_konflux_dockerfile() {
-    local go_version="$1"
-
-    echo "Updating konflux.Dockerfile..." >&2
-
-    if [[ ! -f konflux.Dockerfile ]]; then
-        echo "  ℹ️  konflux.Dockerfile not found, skipping" >&2
-        return 0
-    fi
-
-    sed_inplace "s/\(FROM\s\+brew\.registry\.redhat\.io\/rh-osbs\/openshift-golang-builder:rhel_9_\)\([0-9]\+\.[0-9]\+\)/\1${go_version}/" konflux.Dockerfile
-
-    verify_contains "konflux.Dockerfile" "openshift-golang-builder:rhel_9_${go_version}([^0-9.]|\$)" \
-        "konflux.Dockerfile builder image" || return 1
-
-    echo "  ✅ Updated konflux.Dockerfile" >&2
-}
-
 # Update rpms.in.yaml with the Go version of the builder image used as the
 # resolution context. The lockfile must be regenerated afterwards (the packages
 # already installed in the builder image may change between Go versions).

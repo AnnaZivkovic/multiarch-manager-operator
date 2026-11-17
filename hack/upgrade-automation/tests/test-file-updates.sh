@@ -181,22 +181,6 @@ mkdir -p "$TMPDIR/bundle-broken" && cd "$TMPDIR/bundle-broken"
 echo "FROM totally-different-image:latest AS builder" > bundle.Dockerfile
 expect_fail "update_bundle_dockerfile_builder fails when builder image is unrecognized" update_bundle_dockerfile_builder "$TARGET_VERSION"
 
-# ── update_konflux_dockerfile ───────────────────────────────────
-echo ""
-echo "── update_konflux_dockerfile ──"
-
-mkdir -p "$TMPDIR/konflux-ok" && cd "$TMPDIR/konflux-ok"
-cat > konflux.Dockerfile <<'EOF'
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.24 as builder
-EOF
-expect_ok "update_konflux_dockerfile succeeds on current layout" update_konflux_dockerfile "$TARGET_VERSION"
-assert_contains "konflux.Dockerfile" "openshift-golang-builder:rhel_9_${TARGET_VERSION}([^0-9.]|\$)" \
-    "update_konflux_dockerfile bumps Brew Go builder"
-
-# Missing file: skipped without failure (file is legacy, deleted by MULTIARCH-6540)
-mkdir -p "$TMPDIR/konflux-missing" && cd "$TMPDIR/konflux-missing"
-expect_ok "update_konflux_dockerfile skips when file is missing" update_konflux_dockerfile "$TARGET_VERSION"
-
 # ── update_rpms_in_yaml ─────────────────────────────────────────
 echo ""
 echo "── update_rpms_in_yaml ──"

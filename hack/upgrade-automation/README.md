@@ -48,7 +48,7 @@ Updates all container image references with Go minor version (e.g., 1.24.11 → 
 - `.tekton/*.yaml` - Konflux pipelines: `go-toolset:{go}` (script runner images) and legacy `rhel_9_{go}` (Brew builder)
 - `Dockerfile` - Builder image: `ARG BUILD_IMAGE=...ubi9/go-toolset:{go}`
 - `Makefile` - BUILD_IMAGE variable
-- `bundle.Dockerfile`, `konflux.Dockerfile` - Konflux builders
+- `bundle.Dockerfile` - Konflux bundle builder
 - `rpms.in.yaml` - RPM resolution context image, followed by regeneration of `rpms.lock.yaml` (`make rpm-lockfile`; requires the [rpm-lockfile-prototype](https://github.com/konflux-ci/rpm-lockfile-prototype) tool and network access to the public UBI CDN)
 
 Every update verifies that the expected reference was actually modified and fails
@@ -207,7 +207,6 @@ sed_inplace() {
 | `update_dockerfile()` | Dockerfile | ARG BUILD_IMAGE=...go-toolset:X.Y |
 | `update_makefile_build_image()` | Makefile | BUILD_IMAGE (go-toolset:X.Y, legacy OCP builder) |
 | `update_bundle_dockerfile_builder()` | bundle.Dockerfile | go-toolset:X.Y |
-| `update_konflux_dockerfile()` | konflux.Dockerfile (legacy, see MULTIARCH-6540) | rhel_9_X.Y |
 | `update_rpms_in_yaml()` | rpms.in.yaml | context image go-toolset:X.Y |
 | `update_rpms_lockfile()` | rpms.lock.yaml | regenerated with rpm-lockfile-prototype |
 | `update_go_mod_directive()` | go.mod | go X.Y |

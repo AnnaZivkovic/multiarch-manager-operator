@@ -112,7 +112,6 @@ step_update_base_images() {
     update_dockerfile "$go_minor"
     update_makefile_build_image "$go_minor" "$ocp_version"
     update_bundle_dockerfile_builder "$go_minor"
-    update_konflux_dockerfile "$go_minor"
     update_rpms_in_yaml "$go_minor"
     update_rpms_lockfile
 
@@ -120,7 +119,7 @@ step_update_base_images() {
 
     # Commit changes
     echo "Committing changes..." >&2
-    git add .ci-operator.yaml .tekton/ Dockerfile Makefile bundle.Dockerfile konflux.Dockerfile rpms.in.yaml rpms.lock.yaml 2>/dev/null || true
+    git add .ci-operator.yaml .tekton/ Dockerfile Makefile bundle.Dockerfile rpms.in.yaml rpms.lock.yaml 2>/dev/null || true
     git commit -m "Update Makefile and Dockerfiles to use the new Golang version base image to ${go_minor}"
 
     echo "✅ Step 1 complete" >&2
