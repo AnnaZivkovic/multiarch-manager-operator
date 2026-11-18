@@ -162,11 +162,8 @@ func main() {
 	restConfig := ctrl.GetConfigOrDie()
 	if enableOperator {
 		dynClient := dynamic.NewForConfigOrDie(restConfig)
-		available, err := utils.IsResourceAvailable(context.Background(), dynClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors"))
-		if err != nil {
-			setupLog.Error(err, "could not check ServiceMonitor availability at startup; skipping monitoring cache configuration")
-		} else if available {
-			operator.AddMonitoringCache(cacheOpts.ByObject)
+		if err := configureMonitoringCache(context.Background(), dynClient, cacheOpts.ByObject); err != nil {
+			setupLog.Error(err, "could not check monitoring API availability at startup; skipping monitoring cache configuration")
 		}
 	}
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
@@ -428,6 +425,17 @@ func bindFlags() {
 	zapLogger := zap.New(zap.Level(utils.AtomicLevel), zap.UseDevMode(false))
 	klog.SetLogger(zapLogger)
 	ctrllog.SetLogger(zapLogger)
+}
+
+func configureMonitoringCache(ctx context.Context, dynClient dynamic.Interface, byObject map[client.Object]cache.ByObject) error {
+	available, err := operator.MonitoringAPIsAvailable(ctx, dynClient)
+	if err != nil {
+		return err
+	}
+	if available {
+		operator.AddMonitoringCache(byObject)
+	}
+	return nil
 }
 
 func must(err error, msg string, keysAndValues ...interface{}) {

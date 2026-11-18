@@ -1275,16 +1275,18 @@ func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager)
 	return nil
 }
 
-// monitoringAvailableFunc wraps the logic to check monitoring APIs availability.
-// Both the servicemonitors and the prometheusrules APIs are required, as the reconciler watches and creates both:
-// a missing prometheusrules API would otherwise make the PrometheusRule watch never sync.
-// It is a variable so that tests can replace it.
-var monitoringAvailableFunc = func(ctx context.Context, r *ClusterPodPlacementConfigReconciler) (bool, error) {
-	available, err := utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors"))
+// MonitoringAPIsAvailable reports whether both APIs required by the monitoring cache and watches are served.
+func MonitoringAPIsAvailable(ctx context.Context, dynClient dynamic.Interface) (bool, error) {
+	available, err := utils.IsResourceAvailable(ctx, dynClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors"))
 	if err != nil || !available {
 		return false, err
 	}
-	return utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("prometheusrules"))
+	return utils.IsResourceAvailable(ctx, dynClient, monitoringv1.SchemeGroupVersion.WithResource("prometheusrules"))
+}
+
+// monitoringAvailableFunc is a variable so tests can replace it.
+var monitoringAvailableFunc = func(ctx context.Context, r *ClusterPodPlacementConfigReconciler) (bool, error) {
+	return MonitoringAPIsAvailable(ctx, r.DynamicClient)
 }
 
 // isMonitoringAvailable reports whether the monitoring APIs (servicemonitors.monitoring.coreos.com and
