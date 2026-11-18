@@ -118,9 +118,9 @@ PodDisruptionBudgets for these components.
 
 If you restrict the operand to a few nodes, or add your own PodDisruptionBudgets:
 
-- Run the operand on at least two nodes and drain one node at a time. Before draining the next node,
-  uncordon the previous node and verify that at least one controller pod and one webhook pod are `Ready`
-  on nodes other than the next node to drain. For automated updates, a MachineConfigPool with
+- Run the operand on at least two nodes and drain one node at a time. Before every drain, including the first,
+  verify that at least one controller pod and one webhook pod are `Ready` on nodes other than the node to drain.
+  After maintenance, uncordon the node before moving to the next one. For automated updates, a MachineConfigPool with
   `maxUnavailable: 1` limits node unavailability within that pool, but does not guarantee operand pod readiness.
 - Never add a PodDisruptionBudget to only the webhook. Add one for both the controller and the webhook, or for neither.
 - Don't add PodDisruptionBudgets on single-node clusters, because node drains would block.

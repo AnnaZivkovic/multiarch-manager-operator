@@ -7,8 +7,35 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/operator"
 )
+
+func TestConfigureMonitoringCacheWithoutPrometheusRule(t *testing.T) {
+	gv := monitoringv1.SchemeGroupVersion
+	dynClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		gv.WithResource("servicemonitors"): "ServiceMonitorList",
+		gv.WithResource("prometheusrules"): "PrometheusRuleList",
+	})
+	dynClient.PrependReactor("list", "prometheusrules", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(action.GetResource().GroupResource(), "")
+	})
+	byObject := operator.CacheByObject()
+	want := len(byObject)
+	if err := configureMonitoringCache(t.Context(), dynClient, byObject); err != nil {
+		t.Fatal(err)
+	}
+	if len(byObject) != want {
+		t.Fatalf("cache has %d entries, want %d when PrometheusRule is absent", len(byObject), want)
+	}
+}
 
 type operandManager struct {
 	ctrl.Manager
