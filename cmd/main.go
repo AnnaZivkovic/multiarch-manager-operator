@@ -162,7 +162,10 @@ func main() {
 	restConfig := ctrl.GetConfigOrDie()
 	if enableOperator {
 		dynClient := dynamic.NewForConfigOrDie(restConfig)
-		if utils.IsResourceAvailable(context.Background(), dynClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
+		available, err := utils.IsResourceAvailable(context.Background(), dynClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors"))
+		if err != nil {
+			setupLog.Error(err, "could not check ServiceMonitor availability at startup; skipping monitoring cache configuration")
+		} else if available {
 			operator.AddMonitoringCache(cacheOpts.ByObject)
 		}
 	}
